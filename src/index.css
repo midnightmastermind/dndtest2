@@ -6,6 +6,7 @@ body,
   padding: 0;
   height: 100%;
   overflow: hidden; /* no outer scroll */
+  overflow-y: auto;
 }
 
 body {
@@ -70,7 +71,7 @@ body {
 
 /* --- Draggable instance --- */
 .dnd-instance {
-  display: flex;    /* never stretch to full width */
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 8px 12px;
@@ -81,18 +82,76 @@ body {
   font-size: 13px;
   box-sizing: border-box;
   cursor: grab;
-  z-index: 546;
-  /* This is the key bit to stop it from becoming container-sized */
+
   width: fit-content;
-  
-  align-self: flex-start;  /* even if parent is flex, don't stretch */
+  max-width: 100%;
+  align-self: flex-start;
 }
 
 .dnd-instance--dragging {
   opacity: 0.6;
-  height: 60px !important;
-  background-color: blue;
-max-width: 60px !important;
-color: red;
 }
-  
+/* Make overlay not stretch */
+[data-rbd-drag-handle-context-id],
+.dnd-instance {
+  width: fit-content;
+}
+.containers-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* outer sortable container shell */
+.container-shell {
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #151a20;
+  overflow: hidden;
+}
+
+/* top/bottom sentinel drop zones */
+.container-sentinel {
+  height: 10px;
+  background: transparent;
+}
+.container-sentinel.over {
+  background: rgba(80, 140, 255, 0.25);
+}
+
+.container-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #222;
+  cursor: grab;
+}
+
+.container-list {
+  padding: 10px 12px;
+  min-height: 60px;
+}
+.container-list.over {
+  background: rgba(80, 140, 255, 0.12);
+}
+
+.dnd-instance {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #2b333d;
+  border: 1px solid #3a4452;
+  margin-bottom: 8px;
+  width: fit-content;
+}
+.dnd-instance.hidden {
+  opacity: 0;
+}
+.debugbar>details {
+  overflow-y: scroll;
+}
+.debugbar {
+  height: 40vh;
+}

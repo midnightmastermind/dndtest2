@@ -1,0 +1,44 @@
+import React, { useContext } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+import { GridActionsContext } from "./GridActionsContext";
+import Instance from "./Instance";
+
+function SortableInstanceInner({ instance, containerId }) {
+  const { useRenderCount } = useContext(GridActionsContext);
+
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({
+      id: instance.id,
+      data: { role: "instance", containerId, label: instance.label },
+    });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  useRenderCount(`SortableInstance ${instance.id}`);
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <Instance
+        id={instance.id}
+        label={instance.label}
+        dragAttributes={attributes}
+        dragListeners={listeners}
+      />
+    </div>
+  );
+}
+
+export default React.memo(SortableInstanceInner, (prev, next) => {
+  // If you keep instance objects stable (same id/label), this will skip a lot.
+  return (
+    prev.containerId === next.containerId &&
+    prev.instance?.id === next.instance?.id &&
+    prev.instance?.label === next.instance?.label
+  );
+});
