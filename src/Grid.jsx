@@ -6,7 +6,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
 
 import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
@@ -50,7 +50,7 @@ function GridInner() {
       onDragCancel={handleDragCancel}
     >
       <div className="containers-col">
-        <SortableContext items={containerIds} strategy={verticalListSortingStrategy}>
+        <SortableContext items={containerIds} strategy={rectSortingStrategy}>
           {containersRender.map((c) => (
             <SortableContainer key={c.id} container={c} />
           ))}

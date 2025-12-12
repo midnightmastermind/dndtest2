@@ -109,6 +109,7 @@ body {
   border-radius: 8px;
   background: #151a20;
   overflow: hidden;
+  width: 250px;
 }
 
 /* top/bottom sentinel drop zones */
@@ -149,9 +150,8 @@ body {
 .dnd-instance.hidden {
   opacity: 0;
 }
-.debugbar>details {
+.debugbar>details>pre {
   overflow-y: scroll;
-}
-.debugbar {
-  height: 40vh;
+  height: auto;
+  max-height: 30vh
 }
