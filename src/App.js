@@ -1,25 +1,45 @@
-import logo from './logo.svg';
-import './App.css';
+// App.js
+import React, { useState } from "react";
+import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import Container from "./Container";
+import Instance from "./Instance";
 
-function App() {
+export default function App() {
+  const [instanceContainer, setInstanceContainer] = useState("left");
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  );
+
+  function handleDragEnd({ active, over }) {
+    if (!over) return;
+    // over.id will be "left" or "right"
+    setInstanceContainer(over.id);
+  }
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="app-root">
+      <div className="dnd-page">
+        <h2 style={{ marginBottom: 16 }}>Basic dnd-kit Example</h2>
+
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <div className="containers-row">
+            <Container id="left" label="Left">
+              {instanceContainer === "left" && (
+                <Instance id="item-1" label="Drag me" />
+              )}
+            </Container>
+
+            <Container id="right" label="Right">
+              {instanceContainer === "right" && (
+                <Instance id="item-1" label="Drag me" />
+              )}
+            </Container>
+          </div>
+        </DndContext>
+      </div>
     </div>
   );
 }
-
-export default App;
