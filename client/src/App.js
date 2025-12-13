@@ -87,21 +87,32 @@ export default function App() {
   // -----------------------------
   // SOCKET BIND + HYDRATE
   // -----------------------------
-  useEffect(() => {
-    const unbind = bindSocketToStore(socket, dispatch);
+  // -----------------------------
+// SOCKET BIND + HYDRATE (ONCE)
+// -----------------------------
+useEffect(() => {
+  const unbind = bindSocketToStore(socket, dispatch);
 
-    const savedUserId = localStorage.getItem("moduli-userId");
+  const token = localStorage.getItem("moduli-token");
+  if (!token) return () => unbind?.(); // 👈 don't request_full_state as guest
+
+  let didRequest = false;
+  const request = () => {
+    if (didRequest) return;
+    didRequest = true;
+
     const savedGridId = localStorage.getItem("moduli-gridId");
+    socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
+  };
 
-    if (savedUserId) {
-      if (savedGridId)
-        socket.emit("request_full_state", { gridId: savedGridId });
-      else socket.emit("request_full_state");
-    }
+  if (socket.connected) request();
+  else socket.once("connect", request);
 
-    return () => unbind?.();
-  }, [dispatch]);
-
+  return () => {
+    socket.off("connect", request);
+    unbind?.();
+  };
+}, [dispatch]);
   // -----------------------------
   // TOOLBAR HANDLERS (REAL EMITS)
   // -----------------------------
@@ -204,62 +215,41 @@ export default function App() {
   // CONTEXT VALUES
   // -----------------------------
   const dataValue = useMemo(
-    () => ({
-      activeId: state.activeId,
-      activeSize: state.activeSize,
-      debugEvent: state.debugEvent,
-
-      containers: state.containers,
-      containersRender,
-      instances: state.instances,
-
-      softTick: state.softTick,
-
-      userId: state.userId,
-      gridId: state.gridId,
-      grid: state.grid,
-      panels: state.panels,
-      availableGrids: state.availableGrids,
-      hydrated: state.hydrated,
-    }),
-    [
-      state.activeId,
-      state.activeSize,
-      state.debugEvent,
-      state.containers,
-      containersRender,
-      state.instances,
-      state.softTick,
-      state.userId,
-      state.gridId,
-      state.grid,
-      state.panels,
-      state.availableGrids,
-      state.hydrated,
-    ]
-  );
+  () => ({
+    state,                 // ✅ THIS is the key fix
+    containersRender,      // ✅ keep
+  }),
+  [state, containersRender]
+);
 
   const actionsValue = useMemo(
-    () => ({
-      addContainer,
-      addInstanceToContainer,
-      handleDragStart,
-      handleDragOver,
-      handleDragEnd,
-      handleDragCancel,
-      useRenderCount,
-      socket,
-      dispatch,
-    }),
-    [
-      addContainer,
-      addInstanceToContainer,
-      handleDragStart,
-      handleDragOver,
-      handleDragEnd,
-      handleDragCancel,
-    ]
-  );
+  () => ({
+    socket,
+    dispatch,
+
+    // ✅ add these wrappers so Grid can call them
+    updatePanel: updatePanelAction,
+    updateGrid: updateGridAction,
+
+    addContainer,
+    addInstanceToContainer,
+    handleDragStart,
+    handleDragOver,
+    handleDragEnd,
+    handleDragCancel,
+    useRenderCount,
+  }),
+  [
+    socket,
+    dispatch,
+    addContainer,
+    addInstanceToContainer,
+    handleDragStart,
+    handleDragOver,
+    handleDragEnd,
+    handleDragCancel,
+  ]
+);
 
   useRenderCount("App");
   const components = useMemo(
@@ -274,9 +264,9 @@ export default function App() {
   // -----------------------------
   // LOGIN GATE
   // -----------------------------
-  const savedUserId = localStorage.getItem("moduli-userId");
-  if (!savedUserId) return <LoginScreen />;
+  if (!state.userId) return <LoginScreen />;
 
+console.log(state);
   return (
     <GridActionsContext.Provider value={actionsValue}>
       <GridDataContext.Provider value={dataValue}>
@@ -306,7 +296,7 @@ export default function App() {
 
         <div className="app-root">
           <div className="dnd-page">
-         {/* <Grid components={components} /> */}
+         {state.grid && <Grid components={components} />}
           </div>
         </div>
       </GridDataContext.Provider>

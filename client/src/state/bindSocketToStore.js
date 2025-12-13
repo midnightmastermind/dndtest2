@@ -1,23 +1,15 @@
-// state/bindSocketToStore.js
+// client/src/state/bindSocketToStore.js
 // =========================================
-// bindSocketToStore.js — UPDATED (Aligned w/ server.js + ActionTypes)
+// bindSocketToStore.js — CLEAN + CONSISTENT
 // Goals:
-// - Match backend event names + payload shapes (CURRENT server.js)
-// - Dispatch ONLY the new unified ActionTypes (no legacy)
-// - Keep auth + full_state behavior the same
-// - Prepare for future CRUD (delete / unified update upserts) without breaking now
+// - Match server.js event names + payload shapes
+// - Dispatch ActionTypes using the SAME shapes your reducer/action-creators expect
+// - Keep auth + full_state behavior correct (reconnect w/ token, then hydrate)
+// - Provide proper cleanup for HMR
 //
-// Current server.js actually emits (today):
-// - full_state
-// - container_created                 { container }
-// - instance_created_in_container     { containerId, instance }
-// - container_items_updated           { containerId, items }
-// - instance_updated                  { instance }
-// - panel_updated                     panelObject
-// - grid_updated                      gridPatchObject
-//
-// “Deleted” / “*_updated” (container_updated, etc.) are included as forward-compat
-// listeners only (safe no-ops until server emits them).
+// MERGED FIXES:
+// - full_state -> ONLY dispatch FULL_STATE (atomic hydrate incl gridId)
+// - auth_success -> DO NOT wipe moduli-gridId (so selection persists)
 // =========================================
 
 import { ActionTypes } from "./actions";
@@ -25,47 +17,44 @@ import { ActionTypes } from "./actions";
 export function bindSocketToStore(socket, dispatch) {
   // ======================================================
   // FULL STATE HYDRATE
-  // (DO NOT CHANGE request_full_state behavior on server)
   // ======================================================
-  socket.on("full_state", (payload = {}) => {
+  function onFullState(payload = {}) {
     console.log("[socket] full_state received:", payload);
 
-    // Persist gridId like old app (if provided)
+    // persist selection
     if (payload.gridId) {
       localStorage.setItem("moduli-gridId", payload.gridId);
-      dispatch({ type: ActionTypes.SET_GRID_ID, payload: payload.gridId });
     }
 
+    // ✅ single atomic hydrate (sets gridId + grid + panels + grids list + etc)
     dispatch({ type: ActionTypes.FULL_STATE, payload });
-  });
+  }
+
+  socket.on("full_state", onFullState);
 
   // ======================================================
   // CONTAINERS (CRUD)
-  // NOTE: server.js currently emits container_created + container_items_updated
   // ======================================================
-
-  // CURRENT server event
-  socket.on("container_created", ({ container } = {}) => {
+  function onContainerCreated({ container } = {}) {
     if (!container?.id) return;
 
     dispatch({
       type: ActionTypes.CREATE_CONTAINER,
       payload: { container },
     });
-  });
+  }
 
-  // CURRENT server event
-  socket.on("container_items_updated", ({ containerId, items } = {}) => {
+  function onContainerItemsUpdated({ containerId, items } = {}) {
     if (!containerId || !Array.isArray(items)) return;
 
     dispatch({
       type: ActionTypes.UPDATE_CONTAINER_ITEMS,
       payload: { containerId, items },
     });
-  });
+  }
 
-  // FORWARD-COMPAT (if you later make server emit this unified update upsert)
-  socket.on("container_updated", (payload = {}) => {
+  // forward-compat
+  function onContainerUpdated(payload = {}) {
     const container = payload.container || payload;
     const id = container?.id || payload.containerId;
     if (!id) return;
@@ -74,10 +63,10 @@ export function bindSocketToStore(socket, dispatch) {
       type: ActionTypes.UPDATE_CONTAINER,
       payload: { container: { ...container, id } },
     });
-  });
+  }
 
-  // FORWARD-COMPAT (not emitted by current server.js yet)
-  socket.on("container_deleted", (payload = {}) => {
+  // forward-compat
+  function onContainerDeleted(payload = {}) {
     const containerId = payload.containerId || payload.id;
     if (!containerId) return;
 
@@ -85,35 +74,36 @@ export function bindSocketToStore(socket, dispatch) {
       type: ActionTypes.DELETE_CONTAINER,
       payload: { containerId },
     });
-  });
+  }
+
+  socket.on("container_created", onContainerCreated);
+  socket.on("container_items_updated", onContainerItemsUpdated);
+  socket.on("container_updated", onContainerUpdated);
+  socket.on("container_deleted", onContainerDeleted);
 
   // ======================================================
   // INSTANCES (CRUD)
-  // NOTE: server.js currently emits instance_created_in_container + instance_updated
   // ======================================================
-
-  // CURRENT server event
-  socket.on("instance_created_in_container", ({ containerId, instance } = {}) => {
+  function onInstanceCreatedInContainer({ containerId, instance } = {}) {
     if (!containerId || !instance?.id) return;
 
     dispatch({
       type: ActionTypes.CREATE_INSTANCE_IN_CONTAINER,
       payload: { containerId, instance },
     });
-  });
+  }
 
-  // CURRENT server event
-  socket.on("instance_updated", ({ instance } = {}) => {
+  function onInstanceUpdated({ instance } = {}) {
     if (!instance?.id) return;
 
     dispatch({
       type: ActionTypes.UPDATE_INSTANCE,
       payload: { instance },
     });
-  });
+  }
 
-  // FORWARD-COMPAT (not emitted by current server.js yet)
-  socket.on("instance_deleted", (payload = {}) => {
+  // forward-compat
+  function onInstanceDeleted(payload = {}) {
     const instanceId = payload.instanceId || payload.id;
     if (!instanceId) return;
 
@@ -121,25 +111,26 @@ export function bindSocketToStore(socket, dispatch) {
       type: ActionTypes.DELETE_INSTANCE,
       payload: { instanceId },
     });
-  });
+  }
+
+  socket.on("instance_created_in_container", onInstanceCreatedInContainer);
+  socket.on("instance_updated", onInstanceUpdated);
+  socket.on("instance_deleted", onInstanceDeleted);
 
   // ======================================================
   // PANELS (CRUD)
-  // NOTE: server.js currently emits panel_updated (and uses it for create too)
   // ======================================================
-
-  // CURRENT server event (used for create + update)
-  socket.on("panel_updated", (panel) => {
+  function onPanelUpdated(panel) {
     if (!panel?.id) return;
 
     dispatch({
       type: ActionTypes.UPDATE_PANEL,
       payload: { panel },
     });
-  });
+  }
 
-  // FORWARD-COMPAT (not emitted by current server.js yet)
-  socket.on("panel_deleted", (payload = {}) => {
+  // forward-compat
+  function onPanelDeleted(payload = {}) {
     const panelId = payload.panelId || payload.id;
     if (!panelId) return;
 
@@ -147,34 +138,34 @@ export function bindSocketToStore(socket, dispatch) {
       type: ActionTypes.DELETE_PANEL,
       payload: { panelId },
     });
-  });
+  }
 
-  // (Optional forward-compat alias)
-  socket.on("panel_created", (panel) => {
+  // optional alias
+  function onPanelCreated(panel) {
     if (!panel?.id) return;
 
     dispatch({
       type: ActionTypes.UPDATE_PANEL,
       payload: { panel },
     });
-  });
+  }
+
+  socket.on("panel_updated", onPanelUpdated);
+  socket.on("panel_deleted", onPanelDeleted);
+  socket.on("panel_created", onPanelCreated);
 
   // ======================================================
   // GRIDS (CRUD)
-  // NOTE: server.js currently emits grid_updated with a PATCH OBJECT (not full grid)
   // ======================================================
-
-  // CURRENT server event
-  socket.on("grid_updated", (gridPatch = {}) => {
-    // server currently does: io.emit("grid_updated", updatePatch)
+  function onGridUpdated(gridPatch = {}) {
     dispatch({
       type: ActionTypes.UPDATE_GRID,
       payload: { grid: gridPatch },
     });
-  });
+  }
 
-  // FORWARD-COMPAT (not emitted by current server.js yet)
-  socket.on("grid_deleted", (payload = {}) => {
+  // forward-compat
+  function onGridDeleted(payload = {}) {
     const gridId = payload.gridId || payload.id;
     if (!gridId) return;
 
@@ -183,93 +174,126 @@ export function bindSocketToStore(socket, dispatch) {
       payload: { gridId },
     });
 
-    // If you deleted the active grid, clear persisted selection
     const saved = localStorage.getItem("moduli-gridId");
     if (saved && saved === gridId) localStorage.removeItem("moduli-gridId");
-  });
+  }
 
-  // (Optional forward-compat alias)
-  socket.on("grid_created", (payload = {}) => {
+  // optional alias
+  function onGridCreated(payload = {}) {
     const grid = payload.grid || payload;
     dispatch({
       type: ActionTypes.CREATE_GRID,
       payload: { grid },
     });
-  });
+  }
+
+  socket.on("grid_updated", onGridUpdated);
+  socket.on("grid_deleted", onGridDeleted);
+  socket.on("grid_created", onGridCreated);
 
   // ======================================================
-  // AUTH (old behavior)
+  // AUTH
   // ======================================================
-  socket.on("auth_success", ({ token, userId }) => {
+  function onAuthSuccess({ token, userId } = {}) {
     console.log("[socket] auth_success", { userId });
 
-    localStorage.setItem("moduli-token", token);
-    localStorage.setItem("moduli-userId", userId);
-    localStorage.removeItem("moduli-gridId");
+    if (token) localStorage.setItem("moduli-token", token);
+    if (userId) localStorage.setItem("moduli-userId", userId);
 
-    // easiest: reload so socket.js re-auths cleanly
-    window.location.reload();
-  });
+    // ✅ IMPORTANT FIX:
+    // Do NOT wipe moduli-gridId here, or you lose selected grid persistence.
+    // localStorage.removeItem("moduli-gridId");
 
-  socket.on("auth_error", (msg) => {
+    dispatch({
+      type: ActionTypes.SET_USER_ID,
+      payload: { userId },
+    });
+
+    // Force a new handshake so io.use(auth) runs with the token
+    try {
+      socket.disconnect();
+    } catch {}
+
+    socket.auth = { token };
+    socket.connect();
+
+    // Wait for reconnect, THEN hydrate
+    socket.once("connect", () => {
+      const savedGridId = localStorage.getItem("moduli-gridId");
+      socket.emit(
+        "request_full_state",
+        savedGridId ? { gridId: savedGridId } : undefined
+      );
+    });
+  }
+
+  function onAuthError(msg) {
     console.log("[socket] auth_error:", msg);
     localStorage.removeItem("moduli-token");
     localStorage.removeItem("moduli-userId");
     localStorage.removeItem("moduli-gridId");
-  });
+    dispatch({ type: ActionTypes.LOGOUT });
+  }
 
-  socket.on("connect_error", (err) => {
-    console.log("[socket] connect_error:", err?.message);
+  function onConnectError(err) {
+    const msg = err?.message;
+    console.log("[socket] connect_error:", msg);
 
-    if (err?.message === "INVALID_TOKEN" || err?.message === "USER_NOT_FOUND") {
+    if (msg === "INVALID_TOKEN" || msg === "USER_NOT_FOUND") {
       localStorage.removeItem("moduli-token");
       localStorage.removeItem("moduli-userId");
       localStorage.removeItem("moduli-gridId");
-      window.location.reload();
+
+      dispatch({ type: ActionTypes.LOGOUT });
+
+      try {
+        socket.disconnect();
+      } catch {}
+
+      socket.auth = {}; // guest
+      socket.connect();
     }
-  });
+  }
+
+  socket.on("auth_success", onAuthSuccess);
+  socket.on("auth_error", onAuthError);
+  socket.on("connect_error", onConnectError);
 
   // ======================================================
   // SERVER ERRORS / MISC
   // ======================================================
-  socket.on("server_error", (msg) => {
+  function onServerError(msg) {
     console.warn("[socket] server_error:", msg);
-  });
+  }
+  socket.on("server_error", onServerError);
 
   // ======================================================
   // CLEANUP (important with HMR)
   // ======================================================
   return () => {
-    // full_state
-    socket.off("full_state");
+    socket.off("full_state", onFullState);
 
-    // containers
-    socket.off("container_created");
-    socket.off("container_items_updated");
-    socket.off("container_updated");
-    socket.off("container_deleted");
+    socket.off("container_created", onContainerCreated);
+    socket.off("container_items_updated", onContainerItemsUpdated);
+    socket.off("container_updated", onContainerUpdated);
+    socket.off("container_deleted", onContainerDeleted);
 
-    // instances
-    socket.off("instance_created_in_container");
-    socket.off("instance_updated");
-    socket.off("instance_deleted");
+    socket.off("instance_created_in_container", onInstanceCreatedInContainer);
+    socket.off("instance_updated", onInstanceUpdated);
+    socket.off("instance_deleted", onInstanceDeleted);
 
-    // panels
-    socket.off("panel_updated");
-    socket.off("panel_deleted");
-    socket.off("panel_created");
+    socket.off("panel_updated", onPanelUpdated);
+    socket.off("panel_deleted", onPanelDeleted);
+    socket.off("panel_created", onPanelCreated);
 
-    // grids
-    socket.off("grid_updated");
-    socket.off("grid_deleted");
-    socket.off("grid_created");
+    socket.off("grid_updated", onGridUpdated);
+    socket.off("grid_deleted", onGridDeleted);
+    socket.off("grid_created", onGridCreated);
 
-    // auth
-    socket.off("auth_success");
-    socket.off("auth_error");
-    socket.off("connect_error");
+    socket.off("auth_success", onAuthSuccess);
+    socket.off("auth_error", onAuthError);
+    socket.off("connect_error", onConnectError);
 
-    // misc
-    socket.off("server_error");
+    socket.off("server_error", onServerError);
   };
 }

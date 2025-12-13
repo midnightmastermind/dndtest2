@@ -59,7 +59,19 @@ export function masterReducer(state, action) {
       const userId = typeof action.payload === "string" ? action.payload : action.payload?.userId;
       return { ...state, userId: userId ?? state.userId };
     }
-
+case ActionTypes.LOGOUT: {
+  return {
+    ...state,
+    userId: null,
+    gridId: null,
+    grid: null,
+    panels: [],
+    availableGrids: [],
+    containers: [],
+    instances: [],
+    hydrated: false,
+  };
+}
     // ======================================================
     // GRIDS
     // ======================================================

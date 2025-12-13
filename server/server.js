@@ -4,17 +4,9 @@
 // - Containers + Panels: userId ONLY (gridId ignored)
 // - Grids: still keyed by gridId + userId
 //
-// CHANGES MADE (and only these):
-// - "update_*" functions now UPSERT (create if missing, update if exists)
-// - "update_*" functions accept + persist more than just label (whole object where applicable)
-// - "create_panel" now calls the same upsert logic (no special behavior beyond default props)
-// - "create_container" now calls the same upsert logic (still creates empty items if missing)
-// - "create_instance_in_container" now uses the same upsert logic for instance + container items
-// - "update_container_items" now UPSERTs the container if missing (instead of failing)
-// - "update_instance" now UPSERTs the instance if missing (instead of failing)
-// - "update_grid" now UPSERTs grid if missing (creates new grid with provided gridId via _id)
-//
-// NOTE: request_full_state/auth/cache left as-is.
+// FIXES MERGED (for grid hydration correctness):
+// - full_state always sends grid as a plain JS object (never a mongoose doc)
+// - unified full_state emitter used in both new-grid + existing-grid paths
 // =========================================
 
 import express from "express";
@@ -22,6 +14,7 @@ import http from "http";
 import cors from "cors";
 import mongoose from "mongoose";
 import { Server } from "socket.io";
+import "dotenv/config";
 
 // ========================================================
 // MODELS
@@ -104,6 +97,7 @@ mongoose
   .connect(MONGO_URI)
   .then(() => console.log("🟢 MongoDB connected"))
   .catch((err) => console.error("🔴 MongoDB connect error:", err));
+console.log("🧪 Using MONGO_URI:", MONGO_URI);
 
 // ========================================================
 // CACHE (PER USER)
@@ -163,7 +157,7 @@ async function loadUserIntoCache(userId) {
   grids.forEach((g) => {
     const obj = g.toObject();
     const gid = obj._id.toString();
-    uc.gridsById[gid] = obj;
+    uc.gridsById[gid] = obj; // plain object
   });
 
   // ---- panelsById (user only)
@@ -280,12 +274,11 @@ io.on("connection", (socket) => {
   // FULL STATE REQUEST (merged)
   // - if gridId missing => create a new grid for this user
   // - containers/instances/panels are by userId only (gridId ignored)
+  //
+  // FIX: full_state always sends grid as a plain object
   // ======================================================
-  socket.on("request_full_state", async ({ gridId } = {}) => {
-    console.log("\n🟦 EVENT request_full_state:", {
-      gridId,
-      userId: socket.userId,
-    });
+  socket.on("request_full_state", async (payload = {}) => {
+    let { gridId } = payload || {}; // payload can be undefined/null
 
     const userId = socket.userId;
     if (!userId) {
@@ -294,11 +287,25 @@ io.on("connection", (socket) => {
 
     try {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
-
       const uc = ensureUserCache(userId);
 
       // Helper list for dropdown
       const grids = await getAllGridsForUser(userId);
+
+      // helper to keep full_state payload consistent
+      const emitFullState = (gid) => {
+        const gridObj = uc.gridsById[gid];
+        const safeGrid = gridObj?.toObject ? gridObj.toObject() : gridObj; // ✅ always plain
+
+        socket.emit("full_state", {
+          gridId: gid,
+          grid: safeGrid,
+          panels: Object.values(uc.panelsById),
+          containers: Object.values(uc.containersById),
+          instances: Object.values(uc.instancesById),
+          grids,
+        });
+      };
 
       // ---------- CREATE NEW GRID IF NONE SPECIFIED ----------
       if (!gridId) {
@@ -313,19 +320,13 @@ io.on("connection", (socket) => {
         });
 
         gridId = newGrid._id.toString();
-        uc.gridsById[gridId] = newGrid.toObject();
+        uc.gridsById[gridId] = newGrid.toObject(); // ✅ store plain object
         uc.activeGridId = gridId;
 
         console.log("✅ New grid created:", gridId);
 
-        return socket.emit("full_state", {
-          gridId,
-          grid: uc.gridsById[gridId],
-          panels: Object.values(uc.panelsById),
-          containers: Object.values(uc.containersById),
-          instances: Object.values(uc.instancesById),
-          grids,
-        });
+        emitFullState(gridId);
+        return;
       }
 
       // ---------- LOAD GRID (must belong to user) ----------
@@ -335,21 +336,13 @@ io.on("connection", (socket) => {
           console.log("❌ Grid not found or unauthorized:", gridId);
           return socket.emit("server_error", "Grid not found or unauthorized");
         }
-        uc.gridsById[gridId] = g;
+        uc.gridsById[gridId] = g; // lean object (already plain)
       }
 
       uc.activeGridId = gridId;
 
       console.log("📤 Sending full_state response:", gridId);
-
-      socket.emit("full_state", {
-        gridId,
-        grid: uc.gridsById[gridId],
-        panels: Object.values(uc.panelsById),
-        containers: Object.values(uc.containersById),
-        instances: Object.values(uc.instancesById),
-        grids,
-      });
+      emitFullState(gridId);
     } catch (err) {
       console.error("request_full_state error:", err);
       socket.emit("server_error", "Failed to load state");
@@ -367,7 +360,6 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      // ---- UPSERT semantics ----
       const id = container?.id;
       if (!id) return;
 
@@ -380,14 +372,12 @@ io.on("connection", (socket) => {
 
       if (!Array.isArray(next.items)) next.items = [];
 
-      // cache (reducer shape)
       uc.containersById[id] = {
         id,
         label: next.label ?? "Untitled",
         items: next.items,
       };
 
-      // db (upsert)
       await Container.findOneAndUpdate(
         { id, userId },
         {
@@ -400,7 +390,11 @@ io.on("connection", (socket) => {
       );
 
       io.emit("container_created", {
-        container: { id, label: uc.containersById[id].label, items: uc.containersById[id].items },
+        container: {
+          id,
+          label: uc.containersById[id].label,
+          items: uc.containersById[id].items,
+        },
       });
     } catch (err) {
       console.error("create_container error:", err);
@@ -423,7 +417,6 @@ io.on("connection", (socket) => {
 
       const instanceId = instance.id;
 
-      // ensure container exists in cache (and DB) via UPSERT if missing
       if (!uc.containersById[containerId]) {
         uc.containersById[containerId] = {
           id: containerId,
@@ -440,7 +433,6 @@ io.on("connection", (socket) => {
 
       const c = uc.containersById[containerId];
 
-      // ---- UPSERT instance ----
       const nextInst = {
         ...(uc.instancesById[instanceId] || {}),
         ...(instance || {}),
@@ -451,12 +443,10 @@ io.on("connection", (socket) => {
 
       uc.instancesById[instanceId] = nextInst;
 
-      // add to container items if not present
       if (!c.items.includes(instanceId)) {
         c.items = [...c.items, instanceId];
       }
 
-      // db upserts
       await Promise.all([
         Instance.findOneAndUpdate({ id: instanceId, userId }, nextInst, { upsert: true }),
         Container.findOneAndUpdate(
@@ -489,7 +479,6 @@ io.on("connection", (socket) => {
 
       if (!containerId || !Array.isArray(items)) return;
 
-      // ---- UPSERT container if missing ----
       if (!uc.containersById[containerId]) {
         uc.containersById[containerId] = {
           id: containerId,
@@ -534,7 +523,6 @@ io.on("connection", (socket) => {
 
       const id = instance.id;
 
-      // ---- UPSERT semantics ----
       const next = {
         ...(uc.instancesById[id] || {}),
         ...(instance || {}),
@@ -569,7 +557,6 @@ io.on("connection", (socket) => {
       const panelId = panel?.id;
       if (!panelId) return;
 
-      // ---- UPSERT semantics ----
       const next = {
         ...(uc.panelsById[panelId] || {}),
         ...(panel || {}),
@@ -602,7 +589,6 @@ io.on("connection", (socket) => {
       const panelId = panel?.id;
       if (!panelId) return;
 
-      // ---- same upsert behavior as update_panel (create/update unified) ----
       const next = {
         ...(uc.panelsById[panelId] || {}),
         props: {},
@@ -648,14 +634,11 @@ io.on("connection", (socket) => {
 
       console.log("🟦 EVENT update_grid:", { gridId, updatePatch });
 
-      // ---- UPSERT semantics ----
-      // If grid not in cache, attempt to load it; if missing in DB, create it with provided _id
       if (!uc.gridsById[gridId]) {
         const g = await Grid.findOne({ _id: gridId, userId }).lean();
         if (g) {
           uc.gridsById[gridId] = g;
         } else {
-          // create with explicit _id (Mongo allows client-supplied ObjectId string)
           const created = await Grid.create({
             _id: gridId,
             userId,
@@ -678,6 +661,7 @@ io.on("connection", (socket) => {
         upsert: true,
       });
 
+      // NOTE: leaving your current wire format as-is
       io.emit("grid_updated", updatePatch);
     } catch (err) {
       console.error("update_grid error:", err);

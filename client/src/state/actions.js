@@ -31,7 +31,7 @@ export const ActionTypes = {
   // ------------------------------------------------------
   SET_USER_ID: "SET_USER_ID",
   SET_GRID_ID: "SET_GRID_ID",
-
+  LOGOUT: "LOGOUT",
   // ------------------------------------------------------
   // Grids
   // ------------------------------------------------------
@@ -101,6 +101,7 @@ export const setGridIdAction = (gridId) => ({
   payload: { gridId },
 });
 
+export const logoutAction = () => ({ type: ActionTypes.LOGOUT });
 // ---- grids ----
 export const setGridAction = (grid) => ({
   type: ActionTypes.SET_GRID,
