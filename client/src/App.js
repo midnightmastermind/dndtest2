@@ -82,37 +82,35 @@ export default function App() {
       setRowInput("1");
       setColInput("1");
     }
-  }, [state?.grid?._id, state?.grid?.rows, state?.grid?.cols]);
+  }, [state?.grid?._id, state?.grid?.name, state?.grid?.rows, state?.grid?.cols]);
 
   // -----------------------------
   // SOCKET BIND + HYDRATE
   // -----------------------------
-  // -----------------------------
-// SOCKET BIND + HYDRATE (ONCE)
-// -----------------------------
-useEffect(() => {
-  const unbind = bindSocketToStore(socket, dispatch);
 
-  const token = localStorage.getItem("moduli-token");
-  if (!token) return () => unbind?.(); // 👈 don't request_full_state as guest
+  useEffect(() => {
+    const unbind = bindSocketToStore(socket, dispatch);
 
-  let didRequest = false;
-  const request = () => {
-    if (didRequest) return;
-    didRequest = true;
+    const token = localStorage.getItem("moduli-token");
+    if (!token) return () => unbind?.(); // 👈 don't request_full_state as guest
 
-    const savedGridId = localStorage.getItem("moduli-gridId");
-    socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
-  };
+    let didRequest = false;
+    const request = () => {
+      if (didRequest) return;
+      didRequest = true;
 
-  if (socket.connected) request();
-  else socket.once("connect", request);
+      const savedGridId = localStorage.getItem("moduli-gridId");
+      socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
+    };
 
-  return () => {
-    socket.off("connect", request);
-    unbind?.();
-  };
-}, [dispatch]);
+    if (socket.connected) request();
+    else socket.once("connect", request);
+
+    return () => {
+      socket.off("connect", request);
+      unbind?.();
+    };
+  }, [dispatch]);
   // -----------------------------
   // TOOLBAR HANDLERS (REAL EMITS)
   // -----------------------------
@@ -166,7 +164,6 @@ useEffect(() => {
     if (!state.gridId || !state.grid) return;
 
     const panelId = crypto.randomUUID();
-    const containerId = `taskbox-${panelId}`;
 
     const { row, col } = findNextOpenPosition(
       state.panels || [],
@@ -177,13 +174,12 @@ useEffect(() => {
     const panel = {
       id: panelId,
       role: "panel",
-      type: "taskbox",
-      containerId,
-      props: { containerId },
+      type: "",
       row,
       col,
       width: 1,
       height: 1,
+      containers: [],
       gridId: state.gridId,
     };
 
@@ -191,82 +187,79 @@ useEffect(() => {
     dispatch(createPanelAction(panel));
 
     // ✅ and also upsert/update (your request: do both)
- //   dispatch(updatePanelAction(panel));
+    //   dispatch(updatePanelAction(panel));
 
     // tell server to upsert + broadcast panel_updated
     socket.emit("create_panel", { panel });
 
     // ensure container exists
-  /*  if (!(state.containers || []).some((c) => c.id === containerId)) {
-      dispatch(addContainerAction({ id: containerId, label: "TaskBox" }));
-
-      socket.emit("create_container", {
-        container: { id: containerId, label: "TaskBox" },
-      });
-    }
-
-    // ensure items are empty (both local + server)
-    dispatch(patchContainerItemsAction({ containerId, items: [] }));
-    socket.emit("update_container_items", { containerId, items: [] });
-    */
+    /*  if (!(state.containers || []).some((c) => c.id === containerId)) {
+        dispatch(addContainerAction({ id: containerId, label: "TaskBox" }));
+  
+        socket.emit("create_container", {
+          container: { id: containerId, label: "TaskBox" },
+        });
+      }
+  
+      // ensure items are empty (both local + server)
+      dispatch(patchContainerItemsAction({ containerId, items: [] }));
+      socket.emit("update_container_items", { containerId, items: [] });
+      */
   };
 
   // -----------------------------
   // CONTEXT VALUES
   // -----------------------------
   const dataValue = useMemo(
-  () => ({
-    state,                 // ✅ THIS is the key fix
-    containersRender,      // ✅ keep
-  }),
-  [state, containersRender]
-);
+    () => ({
+      state,                 // ✅ THIS is the key fix
+      containersRender,      // ✅ keep
+    }),
+    [state, containersRender]
+  );
 
   const actionsValue = useMemo(
-  () => ({
-    socket,
-    dispatch,
+    () => ({
+      socket,
+      dispatch,
 
-    // ✅ add these wrappers so Grid can call them
-    updatePanel: updatePanelAction,
-    updateGrid: updateGridAction,
+      // ✅ add these wrappers so Grid can call them
+      updatePanel: updatePanelAction,
+      updateGrid: updateGridAction,
 
-    addContainer,
-    addInstanceToContainer,
-    handleDragStart,
-    handleDragOver,
-    handleDragEnd,
-    handleDragCancel,
-    useRenderCount,
-  }),
-  [
-    socket,
-    dispatch,
-    addContainer,
-    addInstanceToContainer,
-    handleDragStart,
-    handleDragOver,
-    handleDragEnd,
-    handleDragCancel,
-  ]
-);
+      addContainer,
+      addInstanceToContainer,
+      handleDragStart,
+      handleDragOver,
+      handleDragEnd,
+      handleDragCancel,
+      useRenderCount,
+    }),
+    [
+      socket,
+      dispatch,
+      addContainer,
+      addInstanceToContainer,
+      handleDragStart,
+      handleDragOver,
+      handleDragEnd,
+      handleDragCancel,
+    ]
+  );
 
   useRenderCount("App");
-  const components = useMemo(
-    () => ({
-      sortableInstance: SortableInstance,
-      instance: Instance,
-      sortableContainer: SortableContainer,
-    }),
-    []
-  );
+  const components = useMemo(() => ({
+    SortableContainer,
+    Instance,
+    SortableInstance,
+  }), []);
 
   // -----------------------------
   // LOGIN GATE
   // -----------------------------
   if (!state.userId) return <LoginScreen />;
 
-console.log(state);
+  console.log(state);
   return (
     <GridActionsContext.Provider value={actionsValue}>
       <GridDataContext.Provider value={dataValue}>
@@ -296,7 +289,7 @@ console.log(state);
 
         <div className="app-root">
           <div className="dnd-page">
-         {state.grid && <Grid components={components} />}
+            {state.grid && <Grid components={components} />}
           </div>
         </div>
       </GridDataContext.Provider>

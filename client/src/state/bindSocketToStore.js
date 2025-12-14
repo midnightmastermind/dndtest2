@@ -157,12 +157,16 @@ export function bindSocketToStore(socket, dispatch) {
   // ======================================================
   // GRIDS (CRUD)
   // ======================================================
-  function onGridUpdated(gridPatch = {}) {
+  function onGridUpdated(payload = {}) {
+    const gridId = payload.gridId || payload.id;
+    const patch = payload.grid || payload;
+
     dispatch({
       type: ActionTypes.UPDATE_GRID,
-      payload: { grid: gridPatch },
+      payload: { gridId, grid: patch },
     });
   }
+
 
   // forward-compat
   function onGridDeleted(payload = {}) {
@@ -212,7 +216,7 @@ export function bindSocketToStore(socket, dispatch) {
     // Force a new handshake so io.use(auth) runs with the token
     try {
       socket.disconnect();
-    } catch {}
+    } catch { }
 
     socket.auth = { token };
     socket.connect();
@@ -248,7 +252,7 @@ export function bindSocketToStore(socket, dispatch) {
 
       try {
         socket.disconnect();
-      } catch {}
+      } catch { }
 
       socket.auth = {}; // guest
       socket.connect();

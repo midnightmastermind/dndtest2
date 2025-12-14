@@ -128,7 +128,7 @@ async function getAllGridsForUser(userId) {
   const all = await Grid.find({ userId }).sort({ createdAt: 1 }).lean();
   return all.map((g, idx) => ({
     id: g._id.toString(),
-    name: g.name || `Grid ${idx + 1}`,
+    name: g.name,
     createdAt: g.createdAt,
   }));
 }
@@ -289,11 +289,13 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      // Helper list for dropdown
-      const grids = await getAllGridsForUser(userId);
 
       // helper to keep full_state payload consistent
-      const emitFullState = (gid) => {
+      const emitFullState = async (gid) => {
+
+        // Helper list for dropdown
+        const grids = await getAllGridsForUser(userId);
+
         const gridObj = uc.gridsById[gid];
         const safeGrid = gridObj?.toObject ? gridObj.toObject() : gridObj; // ✅ always plain
 
@@ -317,9 +319,11 @@ io.on("connection", (socket) => {
           rowSizes: [],
           colSizes: [],
           userId,
+          name: ""
         });
 
         gridId = newGrid._id.toString();
+
         uc.gridsById[gridId] = newGrid.toObject(); // ✅ store plain object
         uc.activeGridId = gridId;
 
@@ -662,7 +666,7 @@ io.on("connection", (socket) => {
       });
 
       // NOTE: leaving your current wire format as-is
-      io.emit("grid_updated", updatePatch);
+      io.emit("grid_updated", { gridId, grid: updatePatch });
     } catch (err) {
       console.error("update_grid error:", err);
       socket.emit("server_error", "Failed to update grid");
