@@ -46,7 +46,6 @@ function CellDroppable({ r, c, dark, highlight }) {
 
 /* ------------------------------------------------------------
    Grid canvas
-   ✅ No dnd-kit "over" usage. Highlight comes from parent state.
 ------------------------------------------------------------ */
 function GridCanvas({
   gridRef,
@@ -192,19 +191,15 @@ function GridInner({ components }) {
   const gridRef = useRef(null);
   const [activeId, setActiveId] = useState(state.activeId);
   const [activeData, setActiveData] = useState(null);
-
   const [panelDragging, setPanelDragging] = useState(false);
 
-  // ✅ Highlight cell derived from pointer math (single source of truth)
+  // ✅ highlight target cell based on ONE source of truth
   const [panelOverCellId, setPanelOverCellId] = useState(null);
 
-  // ✅ Store cursor offset inside the dragged panel (not startX/startY)
-  const panelPointerRef = useRef({
-    offsetX: 0,
-    offsetY: 0,
-  });
+  // ✅ offset inside the panel (used only if initialRect exists; otherwise harmless)
+  const panelPointerRef = useRef({ offsetX: 0, offsetY: 0 });
 
-  // ✅ REAL cursor/touch pointer while dragging (bypasses dnd-kit rect math)
+  // ✅ REAL cursor/touch pointer (single truth)
   const livePointerRef = useRef({ x: null, y: null });
 
   // ✅ attach global move listeners only while dragging a panel
@@ -231,8 +226,9 @@ function GridInner({ components }) {
     };
   }, [panelDragging]);
 
-  const panelDragLiveRef = useRef({ id: null, dx: 0, dy: 0 });
-
+  // ------------------------
+  // sizes
+  // ------------------------
   const ensureSizes = (arr, count) => {
     if (!Array.isArray(arr) || arr.length === 0) return Array(count).fill(1);
     if (arr.length === count) return arr;
@@ -273,11 +269,7 @@ function GridInner({ components }) {
 
     if (!inside) {
       if (DEBUG_GRID_HIGHLIGHT) {
-        console.log("[GRID] pointer outside grid", {
-          clientX,
-          clientY,
-          rect,
-        });
+        console.log("[GRID] pointer outside grid", { clientX, clientY, rect });
       }
       return null;
     }
@@ -318,8 +310,6 @@ function GridInner({ components }) {
         localY: y,
         colSizes,
         rowSizes,
-        accX,
-        accY,
         row,
         col,
       });
@@ -328,22 +318,26 @@ function GridInner({ components }) {
     return { row, col };
   };
 
-  // ✅ Pointer extraction for mouse/touch (drag start only)
+  // pointer on drag start
   const getStartClientX = (event) =>
     event?.activatorEvent?.clientX ?? event?.activatorEvent?.touches?.[0]?.clientX;
 
   const getStartClientY = (event) =>
     event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
 
+  // ✅ DOM rect fallback for initialRect
+  const getPanelDomRect = (panelId) => {
+    const el = document.querySelector(`[data-panel-id="${panelId}"]`);
+    return el ? el.getBoundingClientRect() : null;
+  };
+
   // ✅ collisionDetection uses highlight cell (same truth as UI)
   const collisionDetection = useMemo(() => {
     return (args) => {
       const activeRole = args.active?.data?.current?.role;
-
       if (activeRole === "panel") {
         return panelOverCellId ? [{ id: panelOverCellId }] : [];
       }
-
       return rectIntersection(args);
     };
   }, [panelOverCellId]);
@@ -356,12 +350,11 @@ function GridInner({ components }) {
     height: panel.height,
   });
 
-  // ✅ helper: derive current pointer from dnd-kit rect + stored offset (DEBUG ONLY)
+  // DEBUG helper only
   const getPointerFromActiveRect = (event) => {
     const translated = event.active?.rect?.current?.translated;
     const initial = event.active?.rect?.current?.initial;
     const rect = translated || initial;
-
     if (!rect) return null;
 
     const x = rect.left + panelPointerRef.current.offsetX;
@@ -393,7 +386,9 @@ function GridInner({ components }) {
       const startX = getStartClientX(event);
       const startY = getStartClientY(event);
 
-      const initialRect = event.active?.rect?.current?.initial;
+      // dnd-kit sometimes gives null initial rect -> DOM fallback
+      const initialRect =
+        event.active?.rect?.current?.initial || getPanelDomRect(event.active.id);
 
       if (DEBUG_GRID_HIGHLIGHT) {
         console.log("[DRAG START]", {
@@ -401,17 +396,11 @@ function GridInner({ components }) {
           startY,
           hasInitialRect: !!initialRect,
           initialRect: initialRect
-            ? {
-                left: initialRect.left,
-                top: initialRect.top,
-                w: initialRect.width,
-                h: initialRect.height,
-              }
+            ? { left: initialRect.left, top: initialRect.top, w: initialRect.width, h: initialRect.height }
             : null,
         });
       }
 
-      // ✅ compute cursor offset inside the draggable using the *initial* rect
       if (
         typeof startX === "number" &&
         typeof startY === "number" &&
@@ -419,23 +408,19 @@ function GridInner({ components }) {
       ) {
         panelPointerRef.current.offsetX = startX - initialRect.left;
         panelPointerRef.current.offsetY = startY - initialRect.top;
-
-        if (DEBUG_GRID_HIGHLIGHT) {
-          console.log("[OFFSET SET]", {
-            offsetX: panelPointerRef.current.offsetX,
-            offsetY: panelPointerRef.current.offsetY,
-          });
-        }
-
-        // seed live pointer so first move tick isn't null
-        livePointerRef.current = { x: startX, y: startY };
-
-        // ✅ highlight pickup cell immediately
-        const rc = getCellFromPointer(startX, startY);
-        setPanelOverCellId(rc ? `cell-${rc.row}-${rc.col}` : null);
       } else {
         panelPointerRef.current.offsetX = 0;
         panelPointerRef.current.offsetY = 0;
+      }
+
+      // seed live pointer so first move tick isn't null
+      livePointerRef.current = { x: startX ?? null, y: startY ?? null };
+
+      // highlight pickup cell immediately (REAL pointer)
+      if (typeof startX === "number" && typeof startY === "number") {
+        const rc = getCellFromPointer(startX, startY);
+        setPanelOverCellId(rc ? `cell-${rc.row}-${rc.col}` : null);
+      } else {
         setPanelOverCellId(null);
       }
 
@@ -449,12 +434,8 @@ function GridInner({ components }) {
     const data = event.active?.data?.current;
     if (!data || data.role !== "panel") return;
 
-    panelDragLiveRef.current.id = data.panelId;
-    panelDragLiveRef.current.dx = event.delta.x;
-    panelDragLiveRef.current.dy = event.delta.y;
-
     const live = livePointerRef.current; // ✅ real cursor
-    const rectPtr = getPointerFromActiveRect(event); // ✅ debug comparison
+    const rectPtr = getPointerFromActiveRect(event); // debug comparison
 
     if (DEBUG_GRID_HIGHLIGHT) {
       console.log("[DRAG MOVE]", {
@@ -466,7 +447,7 @@ function GridInner({ components }) {
 
     if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
 
-    const rc = getCellFromPointer(live.x, live.y); // ✅ USE REAL POINTER
+    const rc = getCellFromPointer(live.x, live.y); // ✅ REAL pointer only
     setPanelOverCellId(rc ? `cell-${rc.row}-${rc.col}` : null);
   };
 
@@ -496,7 +477,7 @@ function GridInner({ components }) {
       return;
     }
 
-    // ✅ finalize using REAL pointer (same truth as highlight)
+    // ✅ finalize using REAL pointer
     const live = livePointerRef.current;
     const rc =
       typeof live?.x === "number" && typeof live?.y === "number"
@@ -519,23 +500,17 @@ function GridInner({ components }) {
     socket.emit("update_panel", { panel: updated, gridId });
 
     // cleanup
-    panelPointerRef.current.offsetX = 0;
-    panelPointerRef.current.offsetY = 0;
-    panelDragLiveRef.current = { id: null, dx: 0, dy: 0 };
-
+    panelPointerRef.current = { offsetX: 0, offsetY: 0 };
     livePointerRef.current = { x: null, y: null };
-
     setPanelOverCellId(null);
+
     requestAnimationFrame(() => setPanelDragging(false));
   };
 
   const handleDragCancel = (event) => {
     setActiveId(null);
 
-    panelPointerRef.current.offsetX = 0;
-    panelPointerRef.current.offsetY = 0;
-    panelDragLiveRef.current = { id: null, dx: 0, dy: 0 };
-
+    panelPointerRef.current = { offsetX: 0, offsetY: 0 };
     livePointerRef.current = { x: null, y: null };
 
     setPanelOverCellId(null);
@@ -545,7 +520,7 @@ function GridInner({ components }) {
     if (role !== "panel") handleDragCancelProp?.(event);
   };
 
-  // ---- Grid resizing (unchanged) ----
+  // ---- Grid resizing (unchanged except one bugfix) ----
   const resizePendingRef = useRef({ rowSizes: null, colSizes: null });
 
   const finalizeResize = () => {
@@ -678,7 +653,7 @@ function GridInner({ components }) {
     };
 
     window.addEventListener("mousemove", move);
-    window.removeEventListener("mouseup", stop);
+    window.addEventListener("mouseup", stop); // ✅ FIXED (was removeEventListener)
     window.addEventListener("touchmove", move);
     window.addEventListener("touchend", stop);
   };

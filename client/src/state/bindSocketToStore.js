@@ -267,8 +267,14 @@ export function bindSocketToStore(socket, dispatch) {
   // SERVER ERRORS / MISC
   // ======================================================
   function onServerError(msg) {
-    console.warn("[socket] server_error:", msg);
+  console.warn("[socket] server_error:", msg);
+
+  // ✅ self-heal bad saved gridId
+  if (typeof msg === "string" && msg.toLowerCase().includes("grid not found")) {
+    localStorage.removeItem("moduli-gridId");
+    socket.emit("request_full_state"); // request default/new/first grid
   }
+}
   socket.on("server_error", onServerError);
 
   // ======================================================

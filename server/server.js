@@ -337,9 +337,30 @@ io.on("connection", (socket) => {
       if (!uc.gridsById[gridId]) {
         const g = await Grid.findOne({ _id: gridId, userId }).lean();
         if (!g) {
-          console.log("❌ Grid not found or unauthorized:", gridId);
-          return socket.emit("server_error", "Grid not found or unauthorized");
-        }
+  console.log("❌ Grid not found or unauthorized:", gridId);
+
+  // ✅ fallback: pick first grid for this user, or create one
+  const userGrids = Object.keys(uc.gridsById);
+  if (userGrids.length) {
+    const fallbackId = userGrids[0];
+    uc.activeGridId = fallbackId;
+    return emitFullState(fallbackId);
+  }
+
+  // no grids at all -> create one
+  const newGrid = await Grid.create({
+    rows: 2,
+    cols: 3,
+    rowSizes: [],
+    colSizes: [],
+    userId,
+  });
+
+  const newId = newGrid._id.toString();
+  uc.gridsById[newId] = newGrid.toObject();
+  uc.activeGridId = newId;
+  return emitFullState(newId);
+}
         uc.gridsById[gridId] = g; // lean object (already plain)
       }
 

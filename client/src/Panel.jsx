@@ -25,7 +25,6 @@ export default function Panel({
   activeSize,
   activeInstance,
 }) {
-
   const resizeTransformRef = useRef({ w: null, h: null });
   const isDraggingPanel = activeId === panel.id;
 
@@ -47,7 +46,8 @@ export default function Panel({
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
     id: panel.id,
     data,
-    disabled: isDraggingPanel,
+    // ✅ IMPORTANT: do NOT disable when it's the active drag item
+    // disabled: isDraggingPanel,  <-- removed
   });
 
   const updatePanelFinal = (updated) => {
@@ -59,7 +59,6 @@ export default function Panel({
   const toggleFullscreen = () => {
     if (!fullscreenPanelId) {
       prev.current = { ...panel };
-
       updatePanelFinal({
         ...panel,
         row: 0,
@@ -67,14 +66,12 @@ export default function Panel({
         width: cols,
         height: rows,
       });
-
       setFullscreenPanelId(panel.id);
     } else {
       updatePanelFinal({
         ...panel,
         ...prev.current,
       });
-
       setFullscreenPanelId(null);
     }
   };
@@ -140,8 +137,6 @@ export default function Panel({
         w: Math.min(newW, cols - panel.col),
         h: Math.min(newH, rows - panel.row),
       };
-
-
     };
 
     const stop = () => {
@@ -158,7 +153,6 @@ export default function Panel({
         width: w ?? panel.width,
         height: h ?? panel.height,
       });
-
     };
 
     window.addEventListener("mousemove", move);
@@ -177,11 +171,7 @@ export default function Panel({
   return (
     <div
       data-panel-id={panel.id}
-      ref={(el) => {
-        setNodeRef(el);
-      }}
-      {...attributes}
-      {...listeners}
+      ref={(el) => setNodeRef(el)}
       style={{
         gridArea,
         background: token("elevation.surface", "rgba(17,17,17,0.95)"),
@@ -191,14 +181,12 @@ export default function Panel({
         position: "relative",
         margin: "3px",
 
-        // ✅ Option A: DO NOT apply dnd-kit transform to the real panel.
-        // The overlay clone moves instead.
+        // ✅ DO NOT transform the real panel; overlay moves instead.
         transform: undefined,
         transition: "none",
 
-        // Make the original look like a “placeholder” while dragging
         opacity: isDragging ? 0 : 1,
-        pointerEvents:isDragging ? "none" : "auto",
+        pointerEvents: isDragging ? "none" : "auto",
         zIndex: 50,
       }}
     >
@@ -215,7 +203,8 @@ export default function Panel({
             color: "white",
           }}
         >
-          <div style={{ paddingLeft: 6, touchAction: "none" }} {...listeners}>
+          <div style={{ paddingLeft: 6, touchAction: "none" }}       {...attributes}
+      {...listeners}>
             <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
           </div>
 

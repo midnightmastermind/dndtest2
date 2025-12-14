@@ -288,9 +288,7 @@ export default function App() {
         />
 
         <div className="app-root">
-          <div className="dnd-page">
             {state.grid && <Grid components={components} />}
-          </div>
         </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>
