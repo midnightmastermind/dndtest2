@@ -1,13 +1,7 @@
 // Panel.jsx
 import React, { useRef, useMemo, useContext, useState } from "react";
-import {
-  useDraggable,
-  useDndContext,
-  DragOverlay,
-  useDroppable,
-} from "@dnd-kit/core";
+import { useDraggable, useDndContext, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
-import Button from "@atlaskit/button";
 import { token } from "@atlaskit/tokens";
 import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 import { ActionTypes } from "./state/actions";
@@ -15,7 +9,6 @@ import { emit } from "./socket";
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { GridActionsContext } from "./GridActionsContext";
 import { GridDataContext } from "./GridDataContext";
-
 
 export default function Panel({
   panel,
@@ -26,17 +19,14 @@ export default function Panel({
   rows,
   activeId,
   gridActive,
-  // ⛔ no more fullscreenPanelId / setFullscreenPanelId needed
   activeSize,
   activeInstance,
 }) {
   const resizeTransformRef = useRef({ w: null, h: null });
 
-  // ✅ NEW: live resize state so the panel re-renders while resizing
   const [liveSize, setLiveSize] = useState({ w: null, h: null });
   const isResizing = liveSize.w != null || liveSize.h != null;
 
-  // ✅ local fullscreen like old app
   const [fullscreen, setFullscreen] = useState(false);
   const prev = useRef(null);
 
@@ -46,34 +36,62 @@ export default function Panel({
   const SortableContainer = components["SortableContainer"];
 
   // ✅ DnD context active/role
-const { active, over } = useDndContext();
+  const { active, over } = useDndContext();
   const activeRole = active?.data?.current?.role ?? null;
-  const activeDragId = active?.id ?? null;
 
-  // ✅ NEW: panel dropzone (so panel can accept containers on empty space)
-const { setNodeRef: setPanelDropRef } = useDroppable({
-  id: `panelDrop:${panel.id}`,
-  data: { role: "panel:drop", panelId: panel.id },
-});
+  const isContainerDrag = activeRole === "container";
+  const isInstanceDrag = activeRole === "instance";
+  const isChildDrag = isContainerDrag || isInstanceDrag;
 
-const overData = over?.data?.current || null;
-const isContainerDrag = activeRole === "container";
+  // ✅ IMPORTANT: disable panel dropzone during INSTANCE drag
+  // (instances must hit container droppables, not panel empty space)
+  const { setNodeRef: setPanelDropRef } = useDroppable({
+    id: `panelDrop:${panel.id}`,
+    data: { role: "panel:drop", panelId: panel.id },
+    disabled: isInstanceDrag,
+  });
 
-// “Over this panel” if:
-// - over is the panel dropzone, OR
-// - over is a container or container:* droppable that belongs to this panel
-const isOverThisPanel =
-  (overData?.role === "panel:drop" && overData?.panelId === panel.id) ||
-  (overData?.panelId === panel.id && (overData?.role === "container")) ||
-  (typeof overData?.role === "string" &&
-    overData.role.startsWith("container:") &&
-    // container:* droppables usually carry containerId; map that to this panel
-    (panel.containers || []).includes(overData.containerId));
+  const overData = over?.data?.current || null;
+
+  // ---------------------------
+  // ✅ Helper: does "over" belong to THIS panel?
+  // Works for container drag AND instance drag
+  // ---------------------------
+  const containerIdBelongsToPanel = (containerId) =>
+    !!containerId && (panel.containers || []).includes(containerId);
+
+  const isOverThisPanel = (() => {
+    if (!overData) return false;
+
+    // panel empty-space dropzone (only relevant for container drag; we disabled it for instances)
+    if (overData.role === "panel:drop" && overData.panelId === panel.id) {
+      return true;
+    }
+
+    // container tiles (often carry panelId)
+    if (overData.role === "container" && overData.panelId === panel.id) {
+      return true;
+    }
+
+    // container:* droppables or instance/instance:* droppables should carry containerId
+    // If that containerId is in this panel, we treat it as "over this panel"
+    const roleStr = typeof overData.role === "string" ? overData.role : "";
+    const isContainerZone = roleStr.startsWith("container:");
+    const isInstanceZone = roleStr === "instance" || roleStr.startsWith("instance:");
+
+    if ((isContainerZone || isInstanceZone) && overData.containerId) {
+      return containerIdBelongsToPanel(overData.containerId);
+    }
+
+    return false;
+  })();
+
   const collapsed = activeId === panel.id;
 
-const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
+  // ✅ highlight for container OR instance drags
+  const highlightPanel = isChildDrag && isOverThisPanel && !collapsed;
 
-  // ✅ your draggable data (ok to be dynamic here)
+  // ✅ draggable data
   const data = useMemo(
     () => ({
       role: "panel",
@@ -86,16 +104,13 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
     [panel]
   );
 
-  // ✅ disable panel drag while fullscreen (matches old UX; remove if you want)
-  const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
+  const { setNodeRef, attributes, listeners } = useDraggable({
     id: panel.id,
     data,
     disabled: fullscreen,
   });
 
   const panelContainerIds = panel?.containers || [];
-
-  // use the draft list during drag, otherwise fall back to state
   const containersSource = containersRender ?? state?.containers ?? [];
 
   const panelContainers = panelContainerIds
@@ -107,7 +122,6 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
     emit("update_panel", { panel: updated, gridId: panel.gridId });
   };
 
-  // ✅ OLD fullscreen behavior (local state)
   const toggleFullscreen = () => {
     if (!fullscreen) {
       prev.current = {
@@ -186,10 +200,7 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
         h: Math.min(newH, rows - panel.row),
       };
 
-      // keep your ref (used on mouseup)
       resizeTransformRef.current = next;
-
-      // ✅ NEW: live preview (forces re-render -> you see snapping)
       setLiveSize(next);
     };
 
@@ -201,8 +212,6 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
 
       const { w, h } = resizeTransformRef.current;
       resizeTransformRef.current = { w: null, h: null };
-
-      // ✅ NEW: clear preview
       setLiveSize({ w: null, h: null });
 
       updatePanelFinal({
@@ -218,11 +227,8 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
     window.addEventListener("touchend", stop);
   };
 
-  // ✅ live snapping values
   const liveW = liveSize.w ?? panel.width;
   const liveH = liveSize.h ?? panel.height;
-
-  // ✅ OLD fix: collapse while dragging so it doesn't block hover / dropping
 
   const gridArea = collapsed
     ? `${panel.row + 1} / ${panel.col + 1} / ${panel.row + 2} / ${panel.col + 2}`
@@ -233,11 +239,12 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
   return (
     <div
       data-panel-id={panel.id}
-      ref={(el) => setNodeRef(el)}
+      ref={setNodeRef}
       style={{
         gridArea,
         background: token("elevation.surface", "rgba(17,17,17,0.95)"),
         borderRadius: 8,
+
         border: highlightPanel
           ? "2px solid rgba(50,150,255,0.9)"
           : "1px solid #AAA",
@@ -249,32 +256,19 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
         overflow: "hidden",
         position: "relative",
         margin: "3px",
-        transform: undefined,
 
-        // ✅ NEW: animate only while resizing (so it feels alive)
         transition: isResizing ? "all 80ms linear" : "none",
-
-        // ✅ optional: obvious feedback
         outline: isResizing ? "2px solid rgba(50,150,255,0.6)" : "none",
 
-        // ✅ OLD hide original while dragging
         opacity: collapsed ? 0 : 1,
         visibility: collapsed ? "hidden" : "visible",
         pointerEvents: collapsed ? "none" : "auto",
 
-        // ✅ pop above others when fullscreen
         zIndex: fullscreen ? 999 : 50,
       }}
     >
-      <div
-        style={{
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        {/* HEADER (fixed) */}
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        {/* HEADER */}
         <div
           style={{
             background: "#2F343A",
@@ -289,7 +283,6 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
             zIndex: fullscreen ? 999 : 1,
           }}
         >
-          {/* drag handle */}
           <div
             style={{ cursor: "grab", paddingLeft: 6, touchAction: "none" }}
             {...attributes}
@@ -298,58 +291,69 @@ const highlightPanel = isContainerDrag && isOverThisPanel && !collapsed;
             <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
           </div>
 
-          {/* spacer */}
           <div style={{ flex: 1 }} />
 
-          {/* add container */}
-          <button
-            onClick={() => addContainerToPanel(panel.id)}
-            style={{ marginRight: 6 }}
-          >
+          <button onClick={() => addContainerToPanel(panel.id)} style={{ marginRight: 6 }}>
             + Container
           </button>
 
-          {/* fullscreen */}
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <button spacing="compact" onClick={toggleFullscreen}>
-              {fullscreen ? "Restore" : "Fullscreen"}
-            </button>
-          </div>
+          <button onClick={toggleFullscreen} style={{ marginRight: 6 }}>
+            {fullscreen ? "Restore" : "Fullscreen"}
+          </button>
         </div>
 
-        {/* ✅ SCROLL AREA (only this scrolls) + ✅ dropzone */}
-        <div
-          ref={setPanelDropRef}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: "auto",
-            overflowX: "hidden",
-            color: "white",
-            margin: 10,
-          }}
-        >
-          <div className="containers-col">
-            <SortableContext
-              items={panelContainerIds}
-              strategy={rectSortingStrategy}
-            >
-              {panelContainers.map((c) => (
-                <SortableContainer key={c.id} container={c} panelId={panel.id} />
-              ))}
-            </SortableContext>
+        {/* ✅ BODY: 3-layer (clip shell -> padded dropzone -> scroller) */}
+{/* ✅ BODY: scroller is the dropzone (single scroll surface) */}
+<div
+  className="panel-body"
+  style={{
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+  }}
+>
+  <div
+  ref={setPanelDropRef}
+  className="panel-scroll"
+  style={{
+    width: "100%",
+    height: "100%",
+    overflowY: "auto",
+    overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
+    overscrollBehavior: "contain",
 
-            {panel?.containers?.length === 0 && (
-              <div className="no-select" style={{ marginTop: 12, opacity: 0.7, fontSize: 13 }}>
-                Create a container to start.
-              </div>
-            )}
-          </div>
+    // ✅ NEVER disable scroll gestures
+    touchAction: "pan-y",
+  }}
+>
+  {/* ✅ scroll buffer at top */}
+  <div style={{ height: 18 }} />
+
+  {/* ✅ actual padded content */}
+  <div style={{ padding: 14, boxSizing: "border-box" }}>
+    <div className="containers-col">
+      <SortableContext items={panelContainerIds} strategy={rectSortingStrategy}>
+        {panelContainers.map((c) => (
+          <SortableContainer key={c.id} container={c} panelId={panel.id} />
+        ))}
+      </SortableContext>
+
+      {panelContainers.length === 0 && (
+        <div style={{ marginTop: 12, opacity: 0.7, fontSize: 13 }}>
+          Create a container to start.
         </div>
+      )}
+    </div>
+  </div>
+
+  {/* ✅ scroll buffer at bottom */}
+  <div style={{ height: 28 }} />
+</div>
+</div>
 
         <ResizeHandle onMouseDown={beginResize} onTouchStart={beginResize} />
       </div>
-
     </div>
   );
 }

@@ -9,8 +9,10 @@ import {
   TouchSensor,
   rectIntersection,
   DragOverlay,
+  pointerWithin,
+  closestCenter
 } from "@dnd-kit/core";
-
+import { MeasuringStrategy } from "@dnd-kit/core";
 import Panel from "./Panel";
 import PanelClone from "./PanelClone";
 import { GridDataContext } from "./GridDataContext";
@@ -30,7 +32,7 @@ function ContainerClone({ container }) {
       style={{ pointerEvents: "none", opacity: 0.95 }}
     >
       <div className="container-header">
-        <div style={{ touchAction: "none", paddingLeft: 6 }}>
+        <div style={{ paddingLeft: 6 }}>
           <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
         </div>
 
@@ -120,7 +122,7 @@ function GridCanvas({
         gridTemplateColumns: colTemplate,
         gridTemplateRows: rowTemplate,
         width: "100%",
-        height: "93vh",
+        height: "85vh",
         overflow: "hidden",
         touchAction: "none",
         overscrollBehaviorY: "none",
@@ -217,11 +219,16 @@ function GridInner({ components }) {
   } = useContext(GridActionsContext);
 
   const sensors = useSensors(
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 500, tolerance: 8 },
-    }),
-    useSensor(PointerSensor)
-  );
+  useSensor(TouchSensor, {
+    activationConstraint: {
+      delay: 0,     // long-press before drag starts
+      tolerance: 0,   // allow small finger wiggle without starting drag
+    },
+  }),
+  useSensor(PointerSensor, {
+    activationConstraint: { distance: 6 }, // mouse/pen/desktop
+  })
+);
 
   useRenderCount("Grid");
 
@@ -282,8 +289,22 @@ const [panelDragging, setPanelDragging] = useState(false);
   const [colSizes, setColSizes] = useState(() => ensureSizes(grid.colSizes, cols));
   const [rowSizes, setRowSizes] = useState(() => ensureSizes(grid.rowSizes, rows));
 
-  useEffect(() => setColSizes(ensureSizes(grid.colSizes, cols)), [grid.colSizes, cols]);
-  useEffect(() => setRowSizes(ensureSizes(grid.rowSizes, rows)), [grid.rowSizes, rows]);
+  function sameArray(a = [], b = []) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+useEffect(() => {
+  const next = ensureSizes(grid?.colSizes, cols);
+  setColSizes(prev => (sameArray(prev, next) ? prev : next));
+}, [cols, grid?._id]);
+
+useEffect(() => {
+  const next = ensureSizes(grid?.rowSizes, rows);
+  setRowSizes(prev => (sameArray(prev, next) ? prev : next));
+}, [rows, grid?._id]);
 
   useEffect(() => {
     if (gridRef.current) {
@@ -360,31 +381,51 @@ const [panelDragging, setPanelDragging] = useState(false);
 
     return { row, col };
   };
-
+function sanitizePanelPlacement(panel, rows, cols) {
+  return {
+    ...panel,
+    row: Math.max(0, Math.min(panel.row, rows - 1)),
+    col: Math.max(0, Math.min(panel.col, cols - 1)),
+    width: panel.width,
+    height: panel.height,
+  };
+}
   const getStartClientX = (event) =>
     event?.activatorEvent?.clientX ?? event?.activatorEvent?.touches?.[0]?.clientX;
 
   const getStartClientY = (event) =>
     event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
 
-  // ✅ collisionDetection uses highlight cell (same truth as UI)
-  const collisionDetection = useMemo(() => {
-    return (args) => {
-      const activeRole = args.active?.data?.current?.role;
-      if (activeRole === "panel") {
-        return panelOverCellId ? [{ id: panelOverCellId }] : [];
-      }
-      return rectIntersection(args);
-    };
-  }, [panelOverCellId]);
+// ✅ helper: expand a rect by padding px
+function padRect(rect, pad) {
+  if (!rect) return rect;
+  return {
+    ...rect,
+    top: rect.top - pad,
+    bottom: rect.bottom + pad,
+    left: rect.left - pad,
+    right: rect.right + pad,
+    width: rect.width + pad * 2,
+    height: rect.height + pad * 2,
+  };
+}
 
-  const sanitizePanelPlacement = (panel, rows, cols) => ({
-    ...panel,
-    row: Math.max(0, Math.min(panel.row, rows - 1)),
-    col: Math.max(0, Math.min(panel.col, cols - 1)),
-    width: panel.width,
-    height: panel.height,
-  });
+// ✅ collisionDetection uses highlight cell (same truth as UI)
+// + pads droppable rects for container/instance drags to reduce "over" flicker
+const collisionDetection = useMemo(() => {
+  return (args) => {
+    const role = args.active?.data?.current?.role;
+
+    // panels keep custom logic
+    if (role === "panel") {
+      return panelOverCellId ? [{ id: panelOverCellId }] : [];
+    }
+
+    // ✅ for container + instance drags: pointer is king
+    const hits = pointerWithin(args);
+    return hits.length ? hits : closestCenter(args);
+  };
+}, [panelOverCellId]);
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
@@ -640,10 +681,23 @@ const [panelDragging, setPanelDragging] = useState(false);
 
   if (!grid?._id) return <div>Loading grid…</div>;
 
+
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
+      measuring={{
+    droppable: {
+      strategy: MeasuringStrategy.Always,
+    },}}
+      autoScroll={{
+    enabled: true,
+    threshold: {
+      x: 0.15,
+      y: 0.15,
+    },
+    acceleration: 30,
+  }}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}

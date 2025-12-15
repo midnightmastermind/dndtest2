@@ -1,5 +1,4 @@
-// dnd/useDndReorderCoordinator.js
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useEffect } from "react";
 import {
   createContainerAction,
   createInstanceInContainerAction,
@@ -46,21 +45,21 @@ function pickEvent(event, type) {
     ts: Date.now(),
     active: a
       ? {
-        id: a.id,
-        role: activeData?.role ?? null,
-        containerId: activeData?.containerId ?? null,
-        panelId: activeData?.panelId ?? null,
-        data: activeData,
-      }
+          id: a.id,
+          role: activeData?.role ?? null,
+          containerId: activeData?.containerId ?? null,
+          panelId: activeData?.panelId ?? null,
+          data: activeData,
+        }
       : null,
     over: o
       ? {
-        id: o.id,
-        role: overData?.role ?? null,
-        containerId: overData?.containerId ?? null,
-        panelId: overData?.panelId ?? null,
-        data: overData,
-      }
+          id: o.id,
+          role: overData?.role ?? null,
+          containerId: overData?.containerId ?? null,
+          panelId: overData?.panelId ?? null,
+          data: overData,
+        }
       : null,
   };
 }
@@ -192,6 +191,23 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
     return containersDraftRef.current ?? state.containers;
   }, [state.containers]);
 
+  // ✅ throttle softTick to once per animation frame
+  const softTickRafRef = useRef(0);
+
+  const scheduleSoftTick = useCallback(() => {
+    if (softTickRafRef.current) return;
+    softTickRafRef.current = requestAnimationFrame(() => {
+      softTickRafRef.current = 0;
+      dispatch(softTickAction());
+    });
+  }, [dispatch]);
+
+  useEffect(() => {
+    return () => {
+      if (softTickRafRef.current) cancelAnimationFrame(softTickRafRef.current);
+    };
+  }, []);
+
   const handleDragStart = useCallback(
     (event) => {
       dispatch(setDebugEventAction(pickEvent(event, "start")));
@@ -218,9 +234,10 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
 
       touchedPanelsRef.current = new Set();
 
-      dispatch(softTickAction());
+      // ✅ CHANGED
+      scheduleSoftTick();
     },
-    [dispatch, state.containers]
+    [dispatch, state.containers, scheduleSoftTick]
   );
 
   const handleDragCancel = useCallback(() => {
@@ -231,8 +248,9 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
     containersDraftRef.current = null;
     touchedPanelsRef.current = new Set();
 
-    dispatch(softTickAction());
-  }, [dispatch]);
+    // ✅ CHANGED
+    scheduleSoftTick();
+  }, [dispatch, scheduleSoftTick]);
 
   const handleDragOver = useCallback(
     (event) => {
@@ -289,7 +307,7 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         const fromIndex = (fromContainer.items || []).indexOf(instanceId);
         if (fromIndex === -1) return;
 
-        // compute toIndex using your existing behavior
+        // compute toIndex
         let toIndex;
         if (!overInstanceId) {
           toIndex = (toContainer.items || []).length;
@@ -317,11 +335,13 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           containersDraftRef.current = draft.map((c) =>
             c.id === fromId ? { ...c, items: nextItems } : c
           );
-          dispatch(softTickAction());
+
+          // ✅ CHANGED
+          scheduleSoftTick();
           return;
         }
 
-        // cross-container move via generic helper
+        // cross-container move
         const moved = moveChildAcrossParents({
           childId: instanceId,
           fromParent: fromContainer,
@@ -337,7 +357,8 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           return c;
         });
 
-        dispatch(softTickAction());
+        // ✅ CHANGED
+        scheduleSoftTick();
         return;
       }
 
@@ -347,30 +368,25 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       if (activeRole === "container" && overInfo.parentRole === "panel") {
         const activeContainerId = active.id;
 
-        // ✅ ALWAYS prefer current parent from state (because we optimistically update panels during dragOver)
         const fromPanel =
           findPanelByContainerId(activeContainerId, state.panels || []) ||
           (active.data?.current?.panelId
             ? findPanelById(active.data.current.panelId, state.panels || [])
             : null);
 
-
         const toPanel = findPanelById(overInfo.parentId, state.panels || []);
-
         if (!fromPanel || !toPanel) return;
-        // ✅ hovering empty space in same panel should not re-run "move"
+
         if (fromPanel.id === toPanel.id && !overInfo.overChildId) {
           return;
         }
 
-        // insert relative to hovered container tile, else append
         let toIndex = null;
         if (overInfo.overChildId) {
           const idx = (toPanel.containers || []).indexOf(overInfo.overChildId);
           if (idx >= 0) toIndex = idx;
         }
 
-        // de-dupe spam
         const lastM = lastContainerMoveRef.current;
         if (
           lastM.fromPanelId === fromPanel.id &&
@@ -387,7 +403,7 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           overChildId: overInfo.overChildId ?? null,
         };
 
-        // same-panel reorder: use arrayMove for nicer behavior
+        // same-panel reorder
         if (fromPanel.id === toPanel.id && overInfo.overChildId) {
           const ids = fromPanel.containers || [];
           const fromIndex = ids.indexOf(activeContainerId);
@@ -398,11 +414,13 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           const nextIds = arrayMove(ids, fromIndex, hoverIndex);
           dispatch(updatePanelAction({ ...fromPanel, containers: nextIds }));
           touchedPanelsRef.current.add(fromPanel.id);
-          dispatch(softTickAction());
+
+          // ✅ CHANGED
+          scheduleSoftTick();
           return;
         }
 
-        // cross-panel move (or append into empty panel)
+        // cross-panel move
         const moved = moveChildAcrossParents({
           childId: activeContainerId,
           fromParent: fromPanel,
@@ -418,11 +436,12 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         touchedPanelsRef.current.add(moved.nextFromParent.id);
         touchedPanelsRef.current.add(moved.nextToParent.id);
 
-        dispatch(softTickAction());
+        // ✅ CHANGED
+        scheduleSoftTick();
         return;
       }
     },
-    [dispatch, state.panels]
+    [dispatch, state.panels, scheduleSoftTick]
   );
 
   const handleDragEnd = useCallback(
@@ -456,7 +475,9 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       // ======================================================
       if (!over) {
         containersDraftRef.current = null;
-        dispatch(softTickAction());
+
+        // ✅ CHANGED
+        scheduleSoftTick();
         return;
       }
 
@@ -478,10 +499,12 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         }
 
         containersDraftRef.current = null;
-        dispatch(softTickAction());
+
+        // ✅ CHANGED
+        scheduleSoftTick();
       }
     },
-    [dispatch, socket, state.containers, state.panels]
+    [dispatch, socket, state.containers, state.panels, scheduleSoftTick]
   );
 
   return useMemo(

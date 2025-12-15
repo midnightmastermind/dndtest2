@@ -7,13 +7,16 @@ body,
   height: 100%;
   overflow: hidden;
   /* no outer scroll */
-  overflow-y: auto;
+  
+    overscroll-behavior-y: contain;
+    
 }
 
 #root {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 body {
@@ -48,7 +51,7 @@ button {
   flex-direction: column;
   padding: 16px;
   box-sizing: border-box;
-  touch-action: none;
+  
   /* important for mobile: disables scrolling while dragging */
 }
 
@@ -99,7 +102,7 @@ button {
   border-radius: 6px;
   background: #2b333d;
   border: 1px solid #3a4452;
-  font-size: 13px;
+  font-size: 12px;
   box-sizing: border-box;
   cursor: grab;
 
@@ -107,6 +110,7 @@ button {
   max-width: 100%;
   align-self: flex-start;
   width: 100%;
+  
 }
 
 .dnd-instance--dragging {
@@ -120,10 +124,13 @@ button {
 /* the area that holds the container tiles */
 .containers-col {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 240px));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
   align-content: start;
-  height: 100%;
+  height: auto;       /* ✅ let it grow */
+  min-height: 0;      /* ✅ important in flex parents */
+  grid-auto-rows: auto; /* ✅ rows grow to content */
+
 }
 
 /* each sortable container tile */
@@ -138,7 +145,7 @@ button {
   border: 1px solid #333;
   border-radius: 8px;
   background: #151a20;
-  overflow: hidden;
+  
 }
 
 /* top/bottom sentinel drop zones */
@@ -161,8 +168,9 @@ button {
 }
 
 .container-list {
-  min-height: 90px !important;
+  min-height: 50px !important;
   height: 100%;
+  flex: 1;
 }
 
 .container-list.over {
@@ -177,11 +185,21 @@ button {
   border: 1px solid #3a4452;
   margin-bottom: 8px;
 }
-
+.dnd-instance {
+  touch-action: none;         /* ✅ */
+  -webkit-user-select: none;  /* ✅ */
+  user-select: none;          /* ✅ */
+}
+/* panels scroll naturally */
+.panel-scroll {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 .dnd-instance.hidden {
   opacity: 0;
+  pointer-events: none; /* ✅ important */
 }
-
 .debugbar>details>pre {
   overflow-y: scroll;
   height: auto;
@@ -213,6 +231,12 @@ button {
   .toolbar input[type="number"] {
     max-width: 10px !important;
   }
+  .container-header {
+    font-size: 13px;
+  }
+  button {
+    font-size: 9px;
+  }
 }
 
 .no-select {
@@ -230,4 +254,12 @@ button {
   /* Standard property */
   cursor: default;
   /* Optional: ensures the cursor doesn't turn into a text selection caret */
+}
+.container-list {
+  height: auto !important;
+  flex: 0 0 auto;
+}
+
+.container-shell {
+  overflow: visible;
 }

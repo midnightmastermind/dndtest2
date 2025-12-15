@@ -49,7 +49,7 @@ export default function Toolbar({
         flex: 1,
         background: "#0e1116",
         borderBottom: "1px solid #222",
-        padding: "1px 10px",
+        padding: "1px 5px",
         fontSize: 12,
         fontFamily: "monospace",
         color: "#9aa4b2",
@@ -70,8 +70,10 @@ export default function Toolbar({
       >
 
         {/* Grid select + New Grid */}
-        <div style={{ display: "flex", alignItems: "end", gap: 8 }}>
-
+        <div style={{ display: "flex", alignItems: "end", gap: 4 }}>
+  <button type="button" style={buttonStyle} onClick={onCreateNewGrid}>
+            + Grid
+          </button>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <label htmlFor="grid_select" style={labelStyle}>
               Grid
@@ -83,7 +85,7 @@ export default function Toolbar({
               style={{
                 ...inputBaseStyle,
                 padding: "4px 8px",
-                width: 60,
+                width: 70,
                 height: "100%"
               }}
             >
@@ -94,20 +96,17 @@ export default function Toolbar({
               ))}
             </select>
           </div>
-          <button type="button" style={buttonStyle} onClick={onCreateNewGrid}>
-            New Grid
-          </button>
         </div>
 
         {/* Grid name + rows/cols */}
-        <div style={{ display: "flex", flex: 1, alignItems: "end" }}>
+        <div style={{ display: "flex", flex: 1, alignItems: "end", justifyContent: "start"}}>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <label htmlFor="grid_name" style={labelStyle}>
               Grid Name
             </label>
             <input
               id="grid_name"
-              value={gridName ?? ""}
+              value={gridName|| `Grid ${String(gridId).slice(-4)}`}
               onChange={(e) => setGridName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -119,12 +118,11 @@ export default function Toolbar({
               type="text"
               style={{
                 ...inputBaseStyle,
-                minWidth: 220,
               }}
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", width: 50}}>
+          <div style={{ display: "flex", flexDirection: "column"}}>
             <label htmlFor="grid_row" style={labelStyle}>
               Rows
             </label>
@@ -148,7 +146,7 @@ export default function Toolbar({
             />
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", width: 50 }}>
+          <div style={{ display: "flex", flexDirection: "column" }}>
             <label htmlFor="grid_col" style={labelStyle}>
               Cols
             </label>
@@ -176,7 +174,7 @@ export default function Toolbar({
         {/* Actions */}
         <div style={{ display: "flex", flex: 1, alignItems: "center", gap: 10 }}>
           <button type="button" style={buttonStyle} onClick={onAddPanel}>
-            Add Panel
+            + Panel
           </button>
         </div>
       </div>

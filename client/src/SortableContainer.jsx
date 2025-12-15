@@ -89,11 +89,10 @@ pointerEvents: isDragging ? "none" : "auto",
     isDraggingInstance &&
     (list.isOver || (overContainerId && overContainerId === container.id));
 
-  const activeInstance = useMemo(() => {
-    const activeId = state.activeId ?? null;
-    if (!activeId) return null;
-    return (state.instances || []).find((x) => x.id === activeId) || null;
-  }, [state.activeId, state.instances]);
+  const activeInstance =
+  active?.data?.current?.role === "instance"
+    ? state.instances.find((x) => x.id === active.id)
+    : null;
 
   const isOverlayHost =
     isDraggingInstance &&
@@ -110,7 +109,7 @@ pointerEvents: isDragging ? "none" : "auto",
         // ✅ make container-shell a column layout so only content scrolls
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden" // keep scroll contained to our inner scroller
+        overflow: "visible" // keep scroll contained to our inner scroller
       }}
       className="container-shell"
     >
@@ -140,23 +139,17 @@ pointerEvents: isDragging ? "none" : "auto",
 
       {/* ✅ SCROLL AREA (only this scrolls) */}
       <div
-        style={{
-          flex: 1,
-          minHeight: 0,        // ✅ critical
-          overflowY: "auto",
-          overflowX: "hidden",
-          padding: 5,          // use padding instead of margin so scroll math is clean
-        }}
-      >
-        <div
-          ref={list.setNodeRef}
-          className={"container-list" + (isHoveringThisContainer ? " over" : "")}
-          style={{
-            // ✅ do NOT make this a scroller; let wrapper scroll
-            overflow: "visible",
-            minHeight: 40,
-          }}
-        >
+  style={{
+    flex: "0 0 auto",
+    overflow: "visible",
+    padding: 5,
+  }}
+>
+  <div
+    ref={list.setNodeRef}
+    className={"container-list" + (isHoveringThisContainer ? " over" : "")}
+    style={{ overflow: "visible" }}
+  >
           <SortableContext
             id={`container-sortable:${container.id}`}
             items={itemIds}
@@ -180,22 +173,24 @@ pointerEvents: isDragging ? "none" : "auto",
         </div>
       </div>
 
-      {/* overlay */}
-      {isOverlayHost &&
-        createPortal(
-          <DragOverlay adjustScale={false}>
-            {state.activeId ? (
-              <div style={{ width: state.activeSize?.width, height: state.activeSize?.height }}>
-                <Instance
-                  id={`overlay-${state.activeId}`}
-                  label={activeInstance?.label ?? "Dragging"}
-                  overlay
-                />
-              </div>
-            ) : null}
-          </DragOverlay>,
-          document.body
-        )}
+{activeInstance &&
+  createPortal(
+    <DragOverlay adjustScale={false}>
+      <div
+        style={{
+          pointerEvents: "none",
+          opacity: 0.95,
+        }}
+      >
+        <Instance
+          id={`overlay-${activeInstance.id}`}
+          label={activeInstance.label}
+          overlay
+        />
+      </div>
+    </DragOverlay>,
+    document.body
+  )}
     </div>
   );
 }

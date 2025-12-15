@@ -8,11 +8,17 @@ import Instance from "./Instance";
 function SortableInstanceInner({ instance, containerId }) {
   const { useRenderCount } = useContext(GridActionsContext);
 
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({
-      id: instance.id,
-      data: { role: "instance", containerId, label: instance.label },
-    });
+  const {
+    setNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: instance.id,
+    data: { role: "instance", containerId, label: instance.label },
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -27,6 +33,7 @@ function SortableInstanceInner({ instance, containerId }) {
       <Instance
         id={instance.id}
         label={instance.label}
+        overlay={false}
         dragAttributes={attributes}
         dragListeners={listeners}
       />
@@ -35,7 +42,6 @@ function SortableInstanceInner({ instance, containerId }) {
 }
 
 export default React.memo(SortableInstanceInner, (prev, next) => {
-  // If you keep instance objects stable (same id/label), this will skip a lot.
   return (
     prev.containerId === next.containerId &&
     prev.instance?.id === next.instance?.id &&
