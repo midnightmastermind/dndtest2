@@ -17,13 +17,13 @@ function SortableInstanceInner({ instance, containerId }) {
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.6 : 1,
+    opacity: isDragging ? 0 : 1,
   };
 
   useRenderCount(`SortableInstance ${instance.id}`);
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div className="no-select" ref={setNodeRef} style={style}>
       <Instance
         id={instance.id}
         label={instance.label}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Textfield from "@atlaskit/textfield";
 import Button from "@atlaskit/button";
 import { Label } from "@atlaskit/form";
@@ -7,12 +7,15 @@ import { socket } from "./socket";
 import { bindSocketToStore } from "./state/bindSocketToStore";
 
 // ✅ use your action creators (no ActionTypes import)
+
 import {
   updateGridAction,
   createPanelAction,
   updatePanelAction,
-  addContainerAction,
-  patchContainerItemsAction,
+
+  // ✅ add these (you already have them in actions.js)
+  createContainerAction,
+  createInstanceInContainerAction,
 } from "./state/actions";
 
 import Grid from "./Grid";
@@ -28,6 +31,7 @@ import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
 import Debugbar from "./Debugbar";
 import Toolbar from "./Toolbar";
+
 
 
 function useRenderCount(label) {
@@ -52,8 +56,6 @@ export default function App() {
   const { state, dispatch } = useBoardState();
 
   const {
-    addContainer,
-    addInstanceToContainer,
     handleDragStart,
     handleDragOver,
     handleDragEnd,
@@ -207,6 +209,55 @@ export default function App() {
       */
   };
 
+  // App.jsx
+const addContainerToPanel = useCallback(
+  (panelId) => {
+    if (!panelId || !state.gridId) return;
+
+    const id = crypto.randomUUID();
+    const label = `List ${(state.containers?.length || 0) + 1}`;
+
+    const container = { id, label, items: [] };
+
+    // 1) optimistic container create
+    dispatch(createContainerAction(container));
+
+    // 2) persist container
+    socket.emit("create_container", { container });
+
+    // 3) optimistic panel patch (attach container id)
+    const panel = (state.panels || []).find((p) => p.id === panelId);
+    if (!panel) return;
+
+    const nextPanel = {
+      ...panel,
+      containers: [...(panel.containers || []), id],
+    };
+
+    dispatch(updatePanelAction(nextPanel));
+    socket.emit("update_panel", { panel: nextPanel, gridId: state.gridId });
+  },
+  [dispatch, socket, state.gridId, state.containers, state.panels]
+);
+
+const addInstanceToContainer = useCallback(
+  (containerId) => {
+    if (!containerId) return;
+
+    const id = crypto.randomUUID();
+    const label = `Item ${(state.instances?.length || 0) + 1}`;
+
+    const instance = { id, label };
+
+    // optimistic
+    dispatch(createInstanceInContainerAction({ containerId, instance }));
+
+    // persist
+    socket.emit("create_instance_in_container", { containerId, instance });
+  },
+  [dispatch, socket, state.instances]
+);
+
   // -----------------------------
   // CONTEXT VALUES
   // -----------------------------
@@ -227,7 +278,7 @@ export default function App() {
       updatePanel: updatePanelAction,
       updateGrid: updateGridAction,
 
-      addContainer,
+      addContainerToPanel,
       addInstanceToContainer,
       handleDragStart,
       handleDragOver,
@@ -238,7 +289,7 @@ export default function App() {
     [
       socket,
       dispatch,
-      addContainer,
+      addContainerToPanel,
       addInstanceToContainer,
       handleDragStart,
       handleDragOver,
@@ -288,7 +339,7 @@ export default function App() {
         />
 
         <div className="app-root">
-            {state.grid && <Grid components={components} />}
+          {state.grid && <Grid components={components} />}
         </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>
