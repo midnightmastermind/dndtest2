@@ -28,3 +28,7 @@ node_modules/
 # eslint cache
 .eslintcache
 **/.cache/
+
+node_modules/
+**/.cache/
+.eslintcache
