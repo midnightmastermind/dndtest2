@@ -37,7 +37,8 @@ button {
   font-family: monospace;
   cursor: pointer;
   z-index: 100;
-}
+  touch-action: manipulation;
+} 
 
 .drag-handle {
   z-index: 100;
@@ -196,14 +197,6 @@ button {
   margin-bottom: 8px;
 }
 
-.dnd-instance {
-  touch-action: none;
-  /* ✅ */
-  -webkit-user-select: none;
-  /* ✅ */
-  user-select: none;
-  /* ✅ */
-}
 
 /* panels scroll naturally */
 .panel-scroll {
@@ -212,10 +205,7 @@ button {
   overscroll-behavior: contain;
   overscroll-behavior-x: none;
 }
-.panel-scroll,
-.panel-scroll > * {
-  touch-action: pan-y;
-}
+
 .dnd-instance.hidden {
   opacity: 0;
   pointer-events: none;

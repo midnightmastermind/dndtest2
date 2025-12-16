@@ -15,7 +15,7 @@ function InstanceInner({
     <div
       className={"dnd-instance" + (isOriginalActive ? " hidden" : "")}
       style={{
-        touchAction: "pan-y",           // ✅ allow scroll
+        touchAction: "manipulation",           // ✅ allow scroll
         WebkitUserSelect: "none",
         userSelect: "none",
       }}

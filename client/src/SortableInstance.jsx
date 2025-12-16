@@ -6,8 +6,7 @@ import { GridActionsContext } from "./GridActionsContext";
 import Instance from "./Instance";
 
 function SortableInstanceInner({ instance, containerId }) {
-  const { useRenderCount } = useContext(GridActionsContext);
-
+  
   const {
     setNodeRef,
     attributes,
@@ -26,12 +25,13 @@ function SortableInstanceInner({ instance, containerId }) {
     opacity: isDragging ? 0 : 1,
   };
 
-  useRenderCount(`SortableInstance ${instance.id}`);
+  
 
   return (
     <div className="no-select" ref={setNodeRef}
       style={{
         ...style,
+        touchAction: "none",
         boxSizing: "border-box",
       }}>
       <Instance

@@ -1,6 +1,6 @@
 // Panel.jsx
 import React, { useRef, useMemo, useState, useCallback } from "react";
-import { useDraggable, useDroppable } from "@dnd-kit/core";
+import { useDraggable, useDndContext, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
 import { token } from "@atlaskit/tokens";
 import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
@@ -26,7 +26,6 @@ export default function Panel({
   addInstanceToContainer,
   instancesById,
   containersSource,
-  useRenderCount,
 }) {
   const resizeTransformRef = useRef({ w: null, h: null });
 
@@ -94,6 +93,26 @@ export default function Panel({
     data,
     disabled: fullscreen,
   });
+
+const { active, measureDroppableContainers } = useDndContext();
+
+  const scrollTimeoutRef = useRef(null);
+
+  const onPanelScroll = useCallback(() => {
+    const role = active?.data?.current?.role;
+    if (role !== "instance") return;
+
+    // Clear previous pending measure
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+
+    // Measure AFTER scrolling pauses
+    scrollTimeoutRef.current = setTimeout(() => {
+      measureDroppableContainers();
+      scrollTimeoutRef.current = null;
+    }, 80); // 60–120ms works well on mobile
+  }, [active, measureDroppableContainers]);
 
   // ✅ IMPORTANT FIX #3:
   // Merge draggable + droppable refs on the OUTER PANEL DIV (shell).
@@ -231,7 +250,7 @@ export default function Panel({
        ${panel.row + liveH + 1} /
        ${panel.col + liveW + 1}`;
 
-  useRenderCount?.(`Panel ${panel.id}`);
+  const panelHandleProps = isChildDrag ? {} : { ...attributes, ...listeners };
 
   return (
     <div
@@ -273,8 +292,7 @@ export default function Panel({
           <div
             className="drag-handle"
             style={{ cursor: "grab", paddingLeft: 6, touchAction: "none" }}
-            {...attributes}
-            {...listeners}
+          {...panelHandleProps}
           >
             <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
           </div>
@@ -295,7 +313,7 @@ export default function Panel({
           className="panel-body"
           style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
         >
-          <div style={{ height: 28 }} />
+          <div style={{ height: 18 }} />
 
           {/* ✅ KEEP your scroll container — BUT it is NOT the droppable ref anymore */}
           <div
@@ -328,8 +346,7 @@ export default function Panel({
                       instancesById={instancesById}
                       addInstanceToContainer={addInstanceToContainer}
                       isDraggingContainer={isContainerDrag}
-                      useRenderCount={useRenderCount}
-                      isInstanceDrag={isInstanceDrag}
+                       isInstanceDrag={isInstanceDrag}
                       overData={overData}
                     />
                   ))}
@@ -369,7 +386,7 @@ export default function Panel({
 
            
           </div>
-          <div style={{ height: 28 }} />
+          <div style={{ height: 18 }} />
         </div>
 
         <ResizeHandle onMouseDown={beginResize} onTouchStart={beginResize} />
@@ -377,3 +394,5 @@ export default function Panel({
     </div>
   );
 }
+
+

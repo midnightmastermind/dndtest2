@@ -335,7 +335,14 @@ export function useDndReorderCoordinator({
 
         const fromId = fromContainer.id;
         const toId = toContainer.id;
+// Prevent reordering if we're hovering a container header
 
+if (
+  activeRole === "instance" &&
+  overRole === "container" 
+) {
+  return;
+}
         const fromIndex = (fromContainer.items || []).indexOf(instanceId);
         if (fromIndex === -1) return;
 
@@ -371,31 +378,48 @@ export function useDndReorderCoordinator({
         if (overInstanceId === instanceId) return;
 
         // ✅ same container reorder
-        if (fromId === toId) {
-          // dropping to end when you're already last: no-op
-          const endIndex = Math.max(0, (toContainer.items || []).length - 1);
-          if (!overInstanceId && fromIndex === endIndex) return;
+        // ✅ same container reorder
+if (fromId === toId) {
+  const items = fromContainer.items || [];
+  const lastIndex = Math.max(0, items.length - 1);
 
-          if (!overInstanceId) {
-            // list background => end
-            const nextItems = arrayMove(fromContainer.items, fromIndex, endIndex);
-            containersDraftRef.current = draft.map((c) =>
-              c.id === fromId ? { ...c, items: nextItems } : c
-            );
-            scheduleSoftTick();
-            return;
-          }
+  // ✅ explicit zone drops (top/list/bottom)
+  if (overRole === "container:top") {
+    if (fromIndex === 0) return;
+    const nextItems = arrayMove(items, fromIndex, 0);
+    containersDraftRef.current = draft.map((c) =>
+      c.id === fromId ? { ...c, items: nextItems } : c
+    );
+    scheduleSoftTick();
+    return;
+  }
 
-          if (toIndex === fromIndex) return;
+  if (overRole === "container:bottom" || overRole === "container:list") {
+    if (fromIndex === lastIndex) return;
+    const nextItems = arrayMove(items, fromIndex, lastIndex);
+    containersDraftRef.current = draft.map((c) =>
+      c.id === fromId ? { ...c, items: nextItems } : c
+    );
+    scheduleSoftTick();
+    return;
+  }
 
-          const nextItems = arrayMove(fromContainer.items, fromIndex, toIndex);
-          containersDraftRef.current = draft.map((c) =>
-            c.id === fromId ? { ...c, items: nextItems } : c
-          );
-          scheduleSoftTick();
-          return;
-        }
+  // ✅ hovering an instance (before/after)
+  if (overInstanceId) {
+    // clamp in case toIndex becomes items.length
+    const target = Math.max(0, Math.min(lastIndex, toIndex));
+    if (target === fromIndex) return;
 
+    const nextItems = arrayMove(items, fromIndex, target);
+    containersDraftRef.current = draft.map((c) =>
+      c.id === fromId ? { ...c, items: nextItems } : c
+    );
+    scheduleSoftTick();
+    return;
+  }
+
+  return;
+}
         // cross-container move
         const moved = moveChildAcrossParents({
           childId: instanceId,

@@ -30,11 +30,6 @@ import Instance from "./Instance";
 import Debugbar from "./Debugbar";
 import Toolbar from "./Toolbar";
 
-function useRenderCount(label) {
-  const ref = React.useRef(0);
-  ref.current += 1;
-  console.log(`${label} render #${ref.current}`);
-}
 
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
@@ -283,7 +278,7 @@ export default function App() {
       handleDragEnd,
       handleDragCancel,
 
-      useRenderCount,
+      
     }),
     [
       socket,
@@ -307,7 +302,7 @@ export default function App() {
     []
   );
 
-  useRenderCount("App");
+  
 
   if (!state.userId) return <LoginScreen />;
 

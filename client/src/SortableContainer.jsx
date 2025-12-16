@@ -19,7 +19,6 @@ function SortableContainerInner({
   instancesById,
   addInstanceToContainer,
   isDraggingContainer,
-  useRenderCount,
   overData, // ✅ add
   isInstanceDrag,
 }) {
@@ -28,16 +27,22 @@ function SortableContainerInner({
     container.id,
   ]);
 
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({
-      id: container.id,
-      data: {
-        role: "container",
-        containerId: container.id,
-        panelId,
-        label: container.label,
-      },
-    });
+  const {
+    setNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: container.id,
+    data: {
+      role: "container",
+      containerId: container.id,
+      panelId,
+      label: container.label,
+    },
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -46,43 +51,59 @@ function SortableContainerInner({
     pointerEvents: isDragging ? "none" : "auto",
   };
 
-
   const items = useMemo(() => {
     return (container.items || []).map((id) => instancesById[id]).filter(Boolean);
   }, [container.items, instancesById]);
-  const isEmpty = items.length === 0;
-
 
   const itemIds = useMemo(() => items.map((x) => x.id), [items]);
+
   const top = useDroppable({
     id: `top:${container.id}`,
-    disabled: isDraggingContainer, // ✅ same behavior as before
-    data: { role: "container:top", containerId: container.id, label: container.label, panelId },
+    disabled: isDraggingContainer,
+    data: {
+      role: "container:top",
+      containerId: container.id,
+      label: container.label,
+      panelId,
+    },
   });
 
   const list = useDroppable({
     id: `list:${container.id}`,
-    disabled: isDraggingContainer, // ✅ only when empty
-    data: { role: "container:list", containerId: container.id, label: container.label, panelId },
+    disabled: isDraggingContainer,
+    data: {
+      role: "container:list",
+      containerId: container.id,
+      label: container.label,
+      panelId,
+    },
   });
 
   const bottom = useDroppable({
     id: `bottom:${container.id}`,
     disabled: isDraggingContainer,
-    data: { role: "container:bottom", containerId: container.id, label: container.label, panelId },
+    data: {
+      role: "container:bottom",
+      containerId: container.id,
+      label: container.label,
+      panelId,
+    },
   });
 
-  useRenderCount?.(`SortableContainer ${container.id}`);
+  const EDGE = 15;
+  const HIT_PAD = 30;
 
-  const EDGE = 8;   // top/bottom zone height
-  const HIT_PAD = 30; 
   const roleStr = typeof overData?.role === "string" ? overData.role : "";
   const isOverThisContainer =
     (roleStr.startsWith("container:") && overData?.containerId === container.id) ||
-    (roleStr === "instance" && overData?.containerId === container.id); // just in case
+    (roleStr === "instance" && overData?.containerId === container.id);
 
   const highlightDrop = isInstanceDrag && isOverThisContainer;
+// inside SortableContainerInner()
 
+const handleDragProps = isInstanceDrag
+  ? {} // ✅ do NOT attach activators during instance drag
+  : { ...attributes, ...listeners };
   return (
     <div
       ref={setNodeRef}
@@ -91,8 +112,18 @@ function SortableContainerInner({
         display: "flex",
         flexDirection: "column",
         overflow: "visible",
-        border: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : undefined,
-        boxShadow: highlightDrop ? "0 0 0 3px rgba(50,150,255,0.25) inset" : undefined,
+
+        // ✅ LAYOUT-SAFE HIGHLIGHT (does not change element rect)
+        outline: highlightDrop
+          ? "2px solid rgba(50,150,255,0.9)"
+          : "0px solid transparent",
+        outlineOffset: 0,
+
+        // keep your inset glow (doesn't affect layout)
+        boxShadow: highlightDrop
+          ? "0 0 0 3px rgba(50,150,255,0.25) inset"
+          : undefined,
+
         borderRadius: 10,
       }}
       className="container-shell"
@@ -100,28 +131,39 @@ function SortableContainerInner({
       {/* HEADER */}
       <div
         className="container-header no-select"
-        style={{   userSelect: "none", flex: "0 0 auto", display: "flex", alignItems: "center" }}
+        style={{
+          userSelect: "none",
+          flex: "0 0 auto",
+          display: "flex",
+          alignItems: "center",
+          pointerEvents: (highlightDrop ? "none" : "auto"),
+        }}
       >
-        <div
+        {!highlightDrop && <div
           className="drag-handle"
           style={{ cursor: "grab", touchAction: "none" }}
-          {...attributes}
-          {...listeners}
+          {...handleDragProps}
         >
           <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
         </div>
-
+}
         <div style={{ fontWeight: 600, padding: "0px 0px 0px 10px" }}>
           {container.label}
         </div>
 
-        <button
-          style={{ marginLeft: "auto" }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={onAdd}
-        >
-          + Instance
-        </button>
+        {!highlightDrop && <button
+  style={{ marginLeft: "auto", touchAction: "manipulation" }}
+  onPointerDown={(e) => {
+    if (!isInstanceDrag) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }}
+  onClick={onAdd}
+>
+  + Instance
+</button>
+}
       </div>
 
       {/* BODY */}
@@ -144,7 +186,6 @@ function SortableContainerInner({
             }}
           />
 
-
           {/* LIST hitbox */}
           <div
             ref={list.setNodeRef}
@@ -160,7 +201,10 @@ function SortableContainerInner({
           />
 
           {/* VISIBLE LIST */}
-          <div className="container-list" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
+          <div
+            className="container-list"
+            style={{ position: "relative", zIndex: 1, overflow: "visible" }}
+          >
             <SortableContext
               id={`container-sortable:${container.id}`}
               items={itemIds}
@@ -219,15 +263,14 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
 
-  // ✅ these must be stable references from above
   if (prev.instancesById !== next.instancesById) return false;
   if (prev.isDraggingContainer !== next.isDraggingContainer) return false;
   if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
 
-  // ✅ allow hover highlight to update
   const pr = prev.overData?.role ?? null;
   const nr = next.overData?.role ?? null;
   if (pr !== nr) return false;
+
   const pc = prev.overData?.containerId ?? null;
   const nc = next.overData?.containerId ?? null;
   if (pc !== nc) return false;
