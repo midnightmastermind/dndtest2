@@ -14,5 +14,7 @@ export const GridActionsContext = createContext({
   // debug helpers
   useRenderCount: () => {},
   dispatch: () => {},
+      instancesById: () => {},
+      addContainerToPanel: () => {},
 
 });

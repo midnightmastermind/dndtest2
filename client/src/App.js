@@ -1,3 +1,4 @@
+// App.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Textfield from "@atlaskit/textfield";
 import Button from "@atlaskit/button";
@@ -6,14 +7,10 @@ import { Label } from "@atlaskit/form";
 import { socket } from "./socket";
 import { bindSocketToStore } from "./state/bindSocketToStore";
 
-// ✅ use your action creators (no ActionTypes import)
-
 import {
   updateGridAction,
   createPanelAction,
   updatePanelAction,
-
-  // ✅ add these (you already have them in actions.js)
   createContainerAction,
   createInstanceInContainerAction,
 } from "./state/actions";
@@ -26,20 +23,18 @@ import { GridActionsContext } from "./GridActionsContext";
 
 import { useBoardState } from "./state/useBoardState";
 import { useDndReorderCoordinator } from "./helpers/useDndReorderCoordinator";
+
 import SortableContainer from "./SortableContainer";
 import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
 import Debugbar from "./Debugbar";
 import Toolbar from "./Toolbar";
 
-
-
 function useRenderCount(label) {
   const ref = React.useRef(0);
   ref.current += 1;
   console.log(`${label} render #${ref.current}`);
 }
-
 
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
@@ -55,16 +50,35 @@ function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
 export default function App() {
   const { state, dispatch } = useBoardState();
 
+  // ✅ local tick for drag preview rendering (no reducer writes)
+  const [dragTick, setDragTick] = useState(0);
+  const scheduleSoftTick = useCallback(() => {
+    setDragTick((x) => x + 1);
+  }, []);
+
   const {
     handleDragStart,
     handleDragOver,
     handleDragEnd,
     handleDragCancel,
     containersDraftRef,
-    getWorkingContainers,
-  } = useDndReorderCoordinator({ state, dispatch, socket });
+    getWorkingContainers
+  } = useDndReorderCoordinator({
+    state,
+    dispatch,
+    socket,
+    scheduleSoftTick, // ✅ NEW
+  });
 
+  // ✅ containers used for rendering (draft during drag, real otherwise)
   const containersRender = getWorkingContainers();
+
+  // ✅ instance lookup map once
+  const instancesById = useMemo(() => {
+    const m = Object.create(null);
+    for (const inst of state.instances || []) m[inst.id] = inst;
+    return m;
+  }, [state.instances]);
 
   // -----------------------------
   // TOOLBAR LOCAL UI STATE
@@ -73,7 +87,6 @@ export default function App() {
   const [rowInput, setRowInput] = useState("1");
   const [colInput, setColInput] = useState("1");
 
-  // Sync toolbar fields from hydrated grid
   useEffect(() => {
     if (state?.grid) {
       setGridName(state.grid.name || "");
@@ -89,12 +102,11 @@ export default function App() {
   // -----------------------------
   // SOCKET BIND + HYDRATE
   // -----------------------------
-
   useEffect(() => {
     const unbind = bindSocketToStore(socket, dispatch);
 
     const token = localStorage.getItem("moduli-token");
-    if (!token) return () => unbind?.(); // 👈 don't request_full_state as guest
+    if (!token) return () => unbind?.();
 
     let didRequest = false;
     const request = () => {
@@ -113,8 +125,9 @@ export default function App() {
       unbind?.();
     };
   }, [dispatch]);
+
   // -----------------------------
-  // TOOLBAR HANDLERS (REAL EMITS)
+  // TOOLBAR HANDLERS
   // -----------------------------
   const handleGridChange = (e) => {
     const newGridId = e.target.value;
@@ -126,39 +139,29 @@ export default function App() {
 
   const handleCreateNewGrid = () => {
     localStorage.removeItem("moduli-gridId");
-    socket.emit("request_full_state"); // server creates new grid
+    socket.emit("request_full_state");
   };
 
   const commitGridName = () => {
     if (!state.gridId) return;
-
     const trimmed = (gridName || "").trim();
     if (!trimmed) return;
 
-    // ✅ optimistic local patch
     dispatch(updateGridAction({ name: trimmed }));
-
-    // server patch
     socket.emit("update_grid", { gridId: state.gridId, name: trimmed });
   };
 
   const updateRows = (val) => {
     if (!state.gridId) return;
     const num = Math.max(1, Number(val) || 1);
-
-    // ✅ optimistic local patch
     dispatch(updateGridAction({ rows: num }));
-
     socket.emit("update_grid", { gridId: state.gridId, rows: num });
   };
 
   const updateCols = (val) => {
     if (!state.gridId) return;
     const num = Math.max(1, Number(val) || 1);
-
-    // ✅ optimistic local patch
     dispatch(updateGridAction({ cols: num }));
-
     socket.emit("update_grid", { gridId: state.gridId, cols: num });
   };
 
@@ -166,7 +169,6 @@ export default function App() {
     if (!state.gridId || !state.grid) return;
 
     const panelId = crypto.randomUUID();
-
     const { row, col } = findNextOpenPosition(
       state.panels || [],
       state.grid.rows ?? 1,
@@ -185,110 +187,108 @@ export default function App() {
       gridId: state.gridId,
     };
 
-    // ✅ optimistic local add (create)
     dispatch(createPanelAction(panel));
-
-    // ✅ and also upsert/update (your request: do both)
-    //   dispatch(updatePanelAction(panel));
-
-    // tell server to upsert + broadcast panel_updated
     socket.emit("create_panel", { panel });
-
-    // ensure container exists
-    /*  if (!(state.containers || []).some((c) => c.id === containerId)) {
-        dispatch(addContainerAction({ id: containerId, label: "TaskBox" }));
-  
-        socket.emit("create_container", {
-          container: { id: containerId, label: "TaskBox" },
-        });
-      }
-  
-      // ensure items are empty (both local + server)
-      dispatch(patchContainerItemsAction({ containerId, items: [] }));
-      socket.emit("update_container_items", { containerId, items: [] });
-      */
   };
 
-  // App.jsx
-const addContainerToPanel = useCallback(
-  (panelId) => {
-    if (!panelId || !state.gridId) return;
+  const addContainerToPanel = useCallback(
+    (panelId) => {
+      if (!panelId || !state.gridId) return;
 
-    const id = crypto.randomUUID();
-    const label = `List ${(state.containers?.length || 0) + 1}`;
+      const id = crypto.randomUUID();
+      const label = `List ${(state.containers?.length || 0) + 1}`;
+      const container = { id, label, items: [] };
 
-    const container = { id, label, items: [] };
+      dispatch(createContainerAction(container));
+      socket.emit("create_container", { container });
 
-    // 1) optimistic container create
-    dispatch(createContainerAction(container));
+      const panel = (state.panels || []).find((p) => p.id === panelId);
+      if (!panel) return;
 
-    // 2) persist container
-    socket.emit("create_container", { container });
+      const nextPanel = {
+        ...panel,
+        containers: [...(panel.containers || []), id],
+      };
 
-    // 3) optimistic panel patch (attach container id)
-    const panel = (state.panels || []).find((p) => p.id === panelId);
-    if (!panel) return;
+      dispatch(updatePanelAction(nextPanel));
+      socket.emit("update_panel", { panel: nextPanel, gridId: state.gridId });
+    },
+    [dispatch, state.gridId, state.containers, state.panels]
+  );
 
-    const nextPanel = {
-      ...panel,
-      containers: [...(panel.containers || []), id],
-    };
+  const addInstanceToContainer = useCallback(
+    (containerId) => {
+      if (!containerId) return;
 
-    dispatch(updatePanelAction(nextPanel));
-    socket.emit("update_panel", { panel: nextPanel, gridId: state.gridId });
-  },
-  [dispatch, socket, state.gridId, state.containers, state.panels]
-);
+      const id = crypto.randomUUID();
+      const label = `Item ${(state.instances?.length || 0) + 1}`;
+      const instance = { id, label };
 
-const addInstanceToContainer = useCallback(
-  (containerId) => {
-    if (!containerId) return;
-
-    const id = crypto.randomUUID();
-    const label = `Item ${(state.instances?.length || 0) + 1}`;
-
-    const instance = { id, label };
-
-    // optimistic
-    dispatch(createInstanceInContainerAction({ containerId, instance }));
-
-    // persist
-    socket.emit("create_instance_in_container", { containerId, instance });
-  },
-  [dispatch, socket, state.instances]
-);
+      dispatch(createInstanceInContainerAction({ containerId, instance }));
+      socket.emit("create_instance_in_container", { containerId, instance });
+    },
+    [dispatch, state.instances]
+  );
 
   // -----------------------------
   // CONTEXT VALUES
   // -----------------------------
+  // ✅ DATA context: ONLY what containers/panels need to render
   const dataValue = useMemo(
     () => ({
-      state,                 // ✅ THIS is the key fix
-      containersRender,      // ✅ keep
+      state: {
+        userId: state.userId,
+        gridId: state.gridId,
+        grid: state.grid,
+        panels: state.panels,
+        containers: state.containers,
+        instances: state.instances,
+        activeId: state.activeId,
+        activeSize: state.activeSize,
+        debugEvent: state.debugEvent,
+        softTick: state.softTick,
+      },
+      containersRender,
     }),
-    [state, containersRender]
+    [
+      state.userId,
+      state.gridId,
+      state.grid,
+      state.panels,
+      state.containers,
+      state.instances,
+      state.activeId,
+      state.activeSize,
+      state.debugEvent,
+      state.softTick,
+      containersRender,
+    ]
   );
 
+
+  // ✅ ACTIONS context: functions + instancesById (stable-ish)
   const actionsValue = useMemo(
     () => ({
       socket,
       dispatch,
-
-      // ✅ add these wrappers so Grid can call them
       updatePanel: updatePanelAction,
       updateGrid: updateGridAction,
 
+      instancesById,
       addContainerToPanel,
       addInstanceToContainer,
+
       handleDragStart,
       handleDragOver,
       handleDragEnd,
       handleDragCancel,
+
       useRenderCount,
     }),
     [
       socket,
       dispatch,
+      instancesById,
       addContainerToPanel,
       addInstanceToContainer,
       handleDragStart,
@@ -298,19 +298,19 @@ const addInstanceToContainer = useCallback(
     ]
   );
 
-  useRenderCount("App");
-  const components = useMemo(() => ({
-    SortableContainer,
-    Instance,
-    SortableInstance,
-  }), []);
+  const components = useMemo(
+    () => ({
+      SortableContainer,
+      Instance,
+      SortableInstance,
+    }),
+    []
+  );
 
-  // -----------------------------
-  // LOGIN GATE
-  // -----------------------------
+  useRenderCount("App");
+
   if (!state.userId) return <LoginScreen />;
 
-  console.log(state);
   return (
     <GridActionsContext.Provider value={actionsValue}>
       <GridDataContext.Provider value={dataValue}>
@@ -338,9 +338,7 @@ const addInstanceToContainer = useCallback(
           debugEvent={state.debugEvent}
         />
 
-        <div className="app-root">
-          {state.grid && <Grid components={components} />}
-        </div>
+        <div className="app-root">{state.grid && <Grid components={components} />}</div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>
   );

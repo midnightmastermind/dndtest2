@@ -7,9 +7,9 @@ body,
   height: 100%;
   overflow: hidden;
   /* no outer scroll */
-  
-    overscroll-behavior-y: contain;
-    
+
+  overscroll-behavior-y: contain;
+
 }
 
 #root {
@@ -36,8 +36,12 @@ button {
   font-size: 12px;
   font-family: monospace;
   cursor: pointer;
+  z-index: 100;
 }
 
+.drag-handle {
+  z-index: 100;
+}
 /* --- Layout wrappers --- */
 .app-root {
   height: 100%;
@@ -51,7 +55,7 @@ button {
   flex-direction: column;
   padding: 16px;
   box-sizing: border-box;
-  
+
   /* important for mobile: disables scrolling while dragging */
 }
 
@@ -98,7 +102,6 @@ button {
   align-items: center;
   justify-content: center;
   padding: 8px 12px;
-  margin-bottom: 6px;
   border-radius: 6px;
   background: #2b333d;
   border: 1px solid #3a4452;
@@ -110,7 +113,7 @@ button {
   max-width: 100%;
   align-self: flex-start;
   width: 100%;
-  
+
 }
 
 .dnd-instance--dragging {
@@ -125,11 +128,14 @@ button {
 .containers-col {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px;
   align-content: start;
-  height: auto;       /* ✅ let it grow */
-  min-height: 0;      /* ✅ important in flex parents */
-  grid-auto-rows: auto; /* ✅ rows grow to content */
+  height: auto;
+  /* ✅ let it grow */
+  min-height: 0;
+  gap: 10px;
+  /* ✅ important in flex parents */
+  grid-auto-rows: auto;
+  /* ✅ rows grow to content */
 
 }
 
@@ -138,14 +144,18 @@ button {
   min-width: 0;
   width: 100%;
   min-height: 126px;
+  /* visual spacing */
+  box-sizing: border-box;
 }
+
+
 
 /* outer sortable container shell */
 .container-shell {
   border: 1px solid #333;
   border-radius: 8px;
   background: #151a20;
-  
+
 }
 
 /* top/bottom sentinel drop zones */
@@ -185,21 +195,33 @@ button {
   border: 1px solid #3a4452;
   margin-bottom: 8px;
 }
+
 .dnd-instance {
-  touch-action: none;         /* ✅ */
-  -webkit-user-select: none;  /* ✅ */
-  user-select: none;          /* ✅ */
+  touch-action: none;
+  /* ✅ */
+  -webkit-user-select: none;
+  /* ✅ */
+  user-select: none;
+  /* ✅ */
 }
+
 /* panels scroll naturally */
 .panel-scroll {
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  overscroll-behavior-x: none;
+}
+.panel-scroll,
+.panel-scroll > * {
+  touch-action: pan-y;
 }
 .dnd-instance.hidden {
   opacity: 0;
-  pointer-events: none; /* ✅ important */
+  pointer-events: none;
+  /* ✅ important */
 }
+
 .debugbar>details>pre {
   overflow-y: scroll;
   height: auto;
@@ -218,6 +240,17 @@ button {
   border: 1px solid #3a4452;
   border-radius: 6px;
 }
+.panel-scroll * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.containers-col,
+.container-shell,
+.container-list,
+.dnd-instance {
+  min-width: 0; /* critical in flex/grid parents */
+}
 
 @media (max-width: 600px) {
   .toolbar * {
@@ -231,11 +264,16 @@ button {
   .toolbar input[type="number"] {
     max-width: 10px !important;
   }
+
   .container-header {
     font-size: 13px;
   }
+
   button {
     font-size: 9px;
+  }
+  .grid-canvas {
+    height: 85vh !important;
   }
 }
 
@@ -255,10 +293,8 @@ button {
   cursor: default;
   /* Optional: ensures the cursor doesn't turn into a text selection caret */
 }
-.container-list {
-  height: auto !important;
-  flex: 0 0 auto;
-}
+
+
 
 .container-shell {
   overflow: visible;

@@ -168,8 +168,9 @@ export function masterReducer(state, action) {
             return {
                 ...state,
                 panels: exists
-                    ? state.panels.map((p) => (p.id === panel.id ? panel : p))
+                    ? state.panels.map((p) => (p.id === panel.id ? { ...p, ...panel } : p))
                     : [...(state.panels || []), panel],
+
             };
         }
 

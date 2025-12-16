@@ -45,21 +45,21 @@ function pickEvent(event, type) {
     ts: Date.now(),
     active: a
       ? {
-          id: a.id,
-          role: activeData?.role ?? null,
-          containerId: activeData?.containerId ?? null,
-          panelId: activeData?.panelId ?? null,
-          data: activeData,
-        }
+        id: a.id,
+        role: activeData?.role ?? null,
+        containerId: activeData?.containerId ?? null,
+        panelId: activeData?.panelId ?? null,
+        data: activeData,
+      }
       : null,
     over: o
       ? {
-          id: o.id,
-          role: overData?.role ?? null,
-          containerId: overData?.containerId ?? null,
-          panelId: overData?.panelId ?? null,
-          data: overData,
-        }
+        id: o.id,
+        role: overData?.role ?? null,
+        containerId: overData?.containerId ?? null,
+        panelId: overData?.panelId ?? null,
+        data: overData,
+      }
       : null,
   };
 }
@@ -73,14 +73,6 @@ function itemsEqual(a = [], b = []) {
 }
 
 // ---------- generic list move helpers ----------
-function removeOne(list = [], id) {
-  const idx = list.indexOf(id);
-  if (idx === -1) return { list, idx: -1 };
-  const next = [...list];
-  next.splice(idx, 1);
-  return { list: next, idx };
-}
-
 function insertAt(list = [], id, index) {
   const next = [...list];
   const clamped = Math.max(0, Math.min(next.length, index));
@@ -88,7 +80,13 @@ function insertAt(list = [], id, index) {
   return next;
 }
 
-function moveChildAcrossParents({ childId, fromParent, toParent, childKey, toIndex = null }) {
+function moveChildAcrossParents({
+  childId,
+  fromParent,
+  toParent,
+  childKey,
+  toIndex = null,
+}) {
   if (!fromParent || !toParent) return null;
 
   const rawFrom = fromParent[childKey] || [];
@@ -137,26 +135,35 @@ function canDropInto(parentRole, childRole) {
  * Normalizes over into:
  *   { parentRole: "panel"|"container", parentId, overChildId? }
  */
-function getOverParent(over) {
+function getOverParent(over, activeRole) {
   if (!over) return null;
   const d = over.data?.current || {};
 
-  // ✅ Container list/top/bottom => parent is container
+  // ✅ If we're dragging a CONTAINER and we're over container:* zones,
+  // treat it as "panel" target using d.panelId.
+  if (
+    activeRole === "container" &&
+    d?.panelId &&
+    typeof d?.role === "string" &&
+    d.role.startsWith("container:")
+  ) {
+    // insert relative to the container we’re hovering
+    return { parentRole: "panel", parentId: d.panelId, overChildId: d.containerId };
+  }
+
+  // original behavior:
   if (d?.containerId && typeof d?.role === "string" && d.role.startsWith("container:")) {
     return { parentRole: "container", parentId: d.containerId };
   }
 
-  // ✅ Hovering an instance => parent is container
   if (d?.role === "instance" && d?.containerId) {
     return { parentRole: "container", parentId: d.containerId, overChildId: over.id };
   }
 
-  // ✅ Panel dropzone => parent is panel
   if (d?.role === "panel:drop" && d?.panelId) {
     return { parentRole: "panel", parentId: d.panelId };
   }
 
-  // ✅ Hovering a container tile => parent is panel (insert relative to that container)
   if (d?.role === "container" && d?.panelId) {
     return { parentRole: "panel", parentId: d.panelId, overChildId: over.id };
   }
@@ -165,7 +172,12 @@ function getOverParent(over) {
 }
 
 // ---------- hook ----------
-export function useDndReorderCoordinator({ state, dispatch, socket }) {
+export function useDndReorderCoordinator({
+  state,
+  dispatch,
+  socket,
+  scheduleSoftTick: scheduleSoftTickExternal, // ✅ optional external tick (preferred)
+}) {
   // instance soft-sort draft ref (kept out of reducer on purpose)
   const containersDraftRef = useRef(null);
 
@@ -187,20 +199,35 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
   // ✅ track which panels were touched, so dragEnd persists once
   const touchedPanelsRef = useRef(new Set());
 
+  // ✅ NEW: keep latest panel objects here so dragEnd doesn’t read stale state.panels
+  const touchedPanelsMapRef = useRef(new Map()); // panelId -> latest panel object
+
+  // ✅ KEEP this (you asked)
   const getWorkingContainers = useCallback(() => {
     return containersDraftRef.current ?? state.containers;
   }, [state.containers]);
 
-  // ✅ throttle softTick to once per animation frame
+  // ✅ throttle tick to once per animation frame
   const softTickRafRef = useRef(0);
 
   const scheduleSoftTick = useCallback(() => {
+    // Prefer App-driven tick (local state) if provided
+    if (typeof scheduleSoftTickExternal === "function") {
+      if (softTickRafRef.current) return;
+      softTickRafRef.current = requestAnimationFrame(() => {
+        softTickRafRef.current = 0;
+        scheduleSoftTickExternal();
+      });
+      return;
+    }
+
+    // Fallback to old behavior (reducer tick)
     if (softTickRafRef.current) return;
     softTickRafRef.current = requestAnimationFrame(() => {
       softTickRafRef.current = 0;
       dispatch(softTickAction());
     });
-  }, [dispatch]);
+  }, [dispatch, scheduleSoftTickExternal]);
 
   useEffect(() => {
     return () => {
@@ -233,8 +260,8 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       };
 
       touchedPanelsRef.current = new Set();
+      touchedPanelsMapRef.current = new Map();
 
-      // ✅ CHANGED
       scheduleSoftTick();
     },
     [dispatch, state.containers, scheduleSoftTick]
@@ -247,8 +274,8 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
 
     containersDraftRef.current = null;
     touchedPanelsRef.current = new Set();
+    touchedPanelsMapRef.current = new Map();
 
-    // ✅ CHANGED
     scheduleSoftTick();
   }, [dispatch, scheduleSoftTick]);
 
@@ -280,7 +307,12 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       const activeRole = active.data?.current?.role ?? null;
       if (activeRole !== "container" && activeRole !== "instance") return;
 
-      const overInfo = getOverParent(over);
+      // ✅ Instances should never reorder into panel empty-space
+      if (activeRole === "instance" && over?.data?.current?.role === "panel:drop") {
+        return;
+      }
+
+      const overInfo = getOverParent(over, activeRole);
       if (!overInfo) return;
 
       if (!canDropInto(overInfo.parentRole, activeRole)) return;
@@ -307,11 +339,17 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         const fromIndex = (fromContainer.items || []).indexOf(instanceId);
         if (fromIndex === -1) return;
 
-        // compute toIndex
+        // ✅ compute toIndex (supports container:top / container:list / container:bottom)
         let toIndex;
-        if (!overInstanceId) {
+
+        // 1) hard zones
+        if (overRole === "container:top") {
+          toIndex = 0;
+        } else if (overRole === "container:bottom" || overRole === "container:list") {
           toIndex = (toContainer.items || []).length;
-        } else {
+        }
+        // 2) hovering an instance => before/after that instance
+        else if (overInstanceId) {
           const idx = (toContainer.items || []).indexOf(overInstanceId);
           toIndex = idx >= 0 ? idx : (toContainer.items || []).length;
 
@@ -324,19 +362,36 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
 
           toIndex = toIndex + (isBelow ? 1 : 0);
         }
+        // 3) fallback
+        else {
+          toIndex = (toContainer.items || []).length;
+        }
 
-        if (fromId === toId && !overInstanceId) return;
+        // avoid no-op churn
         if (overInstanceId === instanceId) return;
 
-        // same container reorder
+        // ✅ same container reorder
         if (fromId === toId) {
+          // dropping to end when you're already last: no-op
+          const endIndex = Math.max(0, (toContainer.items || []).length - 1);
+          if (!overInstanceId && fromIndex === endIndex) return;
+
+          if (!overInstanceId) {
+            // list background => end
+            const nextItems = arrayMove(fromContainer.items, fromIndex, endIndex);
+            containersDraftRef.current = draft.map((c) =>
+              c.id === fromId ? { ...c, items: nextItems } : c
+            );
+            scheduleSoftTick();
+            return;
+          }
+
           if (toIndex === fromIndex) return;
+
           const nextItems = arrayMove(fromContainer.items, fromIndex, toIndex);
           containersDraftRef.current = draft.map((c) =>
             c.id === fromId ? { ...c, items: nextItems } : c
           );
-
-          // ✅ CHANGED
           scheduleSoftTick();
           return;
         }
@@ -357,7 +412,6 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           return c;
         });
 
-        // ✅ CHANGED
         scheduleSoftTick();
         return;
       }
@@ -412,10 +466,13 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
           if (fromIndex === hoverIndex) return;
 
           const nextIds = arrayMove(ids, fromIndex, hoverIndex);
-          dispatch(updatePanelAction({ ...fromPanel, containers: nextIds }));
-          touchedPanelsRef.current.add(fromPanel.id);
 
-          // ✅ CHANGED
+          const updated = { ...fromPanel, containers: nextIds };
+          dispatch(updatePanelAction(updated));
+
+          touchedPanelsRef.current.add(fromPanel.id);
+          touchedPanelsMapRef.current.set(fromPanel.id, updated); // ✅ NEW
+
           scheduleSoftTick();
           return;
         }
@@ -436,7 +493,9 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         touchedPanelsRef.current.add(moved.nextFromParent.id);
         touchedPanelsRef.current.add(moved.nextToParent.id);
 
-        // ✅ CHANGED
+        touchedPanelsMapRef.current.set(moved.nextFromParent.id, moved.nextFromParent); // ✅ NEW
+        touchedPanelsMapRef.current.set(moved.nextToParent.id, moved.nextToParent);     // ✅ NEW
+
         scheduleSoftTick();
         return;
       }
@@ -455,18 +514,19 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       dispatch(setActiveSizeAction(null));
 
       // ======================================================
-      // CONTAINER DROP END: persist touched panels
+      // CONTAINER DROP END: persist touched panels (from ref, not stale state.panels)
       // ======================================================
       if (activeRole === "container") {
         if (!over) return;
 
         const touched = Array.from(touchedPanelsRef.current || []);
         for (const panelId of touched) {
-          const panel = (state.panels || []).find((p) => p.id === panelId);
+          const panel = touchedPanelsMapRef.current.get(panelId); // ✅ NEW
           if (panel) socket?.emit("update_panel", { panel, gridId: panel.gridId });
         }
 
         touchedPanelsRef.current = new Set();
+        touchedPanelsMapRef.current = new Map(); // ✅ NEW
         return;
       }
 
@@ -475,8 +535,6 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
       // ======================================================
       if (!over) {
         containersDraftRef.current = null;
-
-        // ✅ CHANGED
         scheduleSoftTick();
         return;
       }
@@ -499,12 +557,10 @@ export function useDndReorderCoordinator({ state, dispatch, socket }) {
         }
 
         containersDraftRef.current = null;
-
-        // ✅ CHANGED
         scheduleSoftTick();
       }
     },
-    [dispatch, socket, state.containers, state.panels, scheduleSoftTick]
+    [dispatch, socket, state.containers, scheduleSoftTick]
   );
 
   return useMemo(

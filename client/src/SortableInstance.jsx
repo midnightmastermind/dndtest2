@@ -29,7 +29,11 @@ function SortableInstanceInner({ instance, containerId }) {
   useRenderCount(`SortableInstance ${instance.id}`);
 
   return (
-    <div className="no-select" ref={setNodeRef} style={style}>
+    <div className="no-select" ref={setNodeRef}
+      style={{
+        ...style,
+        boxSizing: "border-box",
+      }}>
       <Instance
         id={instance.id}
         label={instance.label}

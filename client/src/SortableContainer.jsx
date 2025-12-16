@@ -1,196 +1,211 @@
-import React, { useContext, useMemo, useCallback } from "react";
-import { useDroppable, useDndContext, DragOverlay } from "@dnd-kit/core";
+// SortableContainer.jsx
+import React, { useMemo, useCallback } from "react";
+import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { createPortal } from "react-dom";
 
-import { GridDataContext } from "./GridDataContext";
-import { GridActionsContext } from "./GridActionsContext";
 import SortableInstance from "./SortableInstance";
-import Instance from "./Instance";
 import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 
-function SortableContainerInner({ container, panelId }) {
-  const { state, containersRender } = useContext(GridDataContext);
-  const { addInstanceToContainer, useRenderCount } = useContext(GridActionsContext);
-  const { over, active } = useDndContext();
+function SortableContainerInner({
+  container,
+  panelId,
 
-  const activeRole = active?.data?.current?.role ?? null;
-  const isDraggingContainer = activeRole === "container";
-  const isDraggingInstance = activeRole === "instance";
-
+  // ✅ injected (no context subscriptions)
+  instancesById,
+  addInstanceToContainer,
+  isDraggingContainer,
+  useRenderCount,
+  overData, // ✅ add
+  isInstanceDrag,
+}) {
   const onAdd = useCallback(() => addInstanceToContainer(container.id), [
     addInstanceToContainer,
     container.id,
   ]);
 
-  const {
-    setNodeRef,
-    attributes,
-    listeners,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: container.id,
-    data: { role: "container", containerId: container.id, panelId, label: container.label },
-  });
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({
+      id: container.id,
+      data: {
+        role: "container",
+        containerId: container.id,
+        panelId,
+        label: container.label,
+      },
+    });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-opacity: isDragging ? 0 : 1,
-pointerEvents: isDragging ? "none" : "auto",
+    opacity: isDragging ? 0 : 1,
+    pointerEvents: isDragging ? "none" : "auto",
   };
 
-  useDroppable({
+
+  const items = useMemo(() => {
+    return (container.items || []).map((id) => instancesById[id]).filter(Boolean);
+  }, [container.items, instancesById]);
+  const isEmpty = items.length === 0;
+
+
+  const itemIds = useMemo(() => items.map((x) => x.id), [items]);
+  const top = useDroppable({
     id: `top:${container.id}`,
-    disabled: isDraggingContainer,
-    data: { role: "container:top", containerId: container.id, label: container.label },
+    disabled: isDraggingContainer, // ✅ same behavior as before
+    data: { role: "container:top", containerId: container.id, label: container.label, panelId },
   });
 
   const list = useDroppable({
     id: `list:${container.id}`,
-    disabled: isDraggingContainer,
-    data: { role: "container:list", containerId: container.id, label: container.label },
+    disabled: isDraggingContainer, // ✅ only when empty
+    data: { role: "container:list", containerId: container.id, label: container.label, panelId },
   });
 
-  useDroppable({
+  const bottom = useDroppable({
     id: `bottom:${container.id}`,
     disabled: isDraggingContainer,
-    data: { role: "container:bottom", containerId: container.id, label: container.label },
+    data: { role: "container:bottom", containerId: container.id, label: container.label, panelId },
   });
 
-  const instanceMap = useMemo(() => {
-    const map = {};
-    for (const inst of state.instances || []) map[inst.id] = inst;
-    return map;
-  }, [state.instances]);
+  useRenderCount?.(`SortableContainer ${container.id}`);
 
-  const items = useMemo(() => {
-    return (container.items || []).map((id) => instanceMap[id]).filter(Boolean);
-  }, [container.items, instanceMap]);
+  const EDGE = 8;   // top/bottom zone height
+  const HIT_PAD = 30; 
+  const roleStr = typeof overData?.role === "string" ? overData.role : "";
+  const isOverThisContainer =
+    (roleStr.startsWith("container:") && overData?.containerId === container.id) ||
+    (roleStr === "instance" && overData?.containerId === container.id); // just in case
 
-  const itemIds = useMemo(() => items.map((x) => x.id), [items]);
-
-  const overContainerId =
-    isDraggingInstance
-      ? (over?.data?.current?.containerId ??
-        (typeof over?.id === "string" && over.id.startsWith("list:")
-          ? over.id.slice("list:".length)
-          : null))
-      : null;
-
-  const isHoveringThisContainer =
-    isDraggingInstance &&
-    (list.isOver || (overContainerId && overContainerId === container.id));
-
-  const activeInstance =
-  active?.data?.current?.role === "instance"
-    ? state.instances.find((x) => x.id === active.id)
-    : null;
-
-  const isOverlayHost =
-    isDraggingInstance &&
-    (!containersRender?.length || containersRender[0]?.id === container.id);
-
-  useRenderCount(`SortableContainer ${container.id}`);
+  const highlightDrop = isInstanceDrag && isOverThisContainer;
 
   return (
     <div
       ref={setNodeRef}
       style={{
         ...style,
-
-        // ✅ make container-shell a column layout so only content scrolls
         display: "flex",
         flexDirection: "column",
-        overflow: "visible" // keep scroll contained to our inner scroller
+        overflow: "visible",
+        border: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : undefined,
+        boxShadow: highlightDrop ? "0 0 0 3px rgba(50,150,255,0.25) inset" : undefined,
+        borderRadius: 10,
       }}
       className="container-shell"
     >
-      {/* HEADER (fixed) */}
+      {/* HEADER */}
       <div
         className="container-header no-select"
-        style={{
-          flex: "0 0 auto",
-          display: "flex",
-          alignItems: "center",
-        }}
+        style={{   userSelect: "none", flex: "0 0 auto", display: "flex", alignItems: "center" }}
       >
-        <div style={{ cursor: "grab", touchAction: "none" }} {...attributes} {...listeners}>
+        <div
+          className="drag-handle"
+          style={{ cursor: "grab", touchAction: "none" }}
+          {...attributes}
+          {...listeners}
+        >
           <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
         </div>
 
-        <div style={{ fontWeight: 600, padding: "0px 10px" }}>{container.label}</div>
+        <div style={{ fontWeight: 600, padding: "0px 0px 0px 10px" }}>
+          {container.label}
+        </div>
 
         <button
           style={{ marginLeft: "auto" }}
-          onPointerDown={(e) => e.stopPropagation()} // ✅ prevents accidental drag
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={onAdd}
         >
           + Instance
         </button>
       </div>
 
-      {/* ✅ SCROLL AREA (only this scrolls) */}
+      {/* BODY */}
       <div
-  style={{
-    flex: "0 0 auto",
-    overflow: "visible",
-    padding: 5,
-  }}
->
-  <div
-    ref={list.setNodeRef}
-    className={"container-list" + (isHoveringThisContainer ? " over" : "")}
-    style={{ overflow: "visible" }}
-  >
-          <SortableContext
-            id={`container-sortable:${container.id}`}
-            items={itemIds}
-            strategy={verticalListSortingStrategy}
-          >
-            {items.map((inst) => (
-              <SortableInstance
-                key={inst.id}
-                instance={inst}
-                containerId={container.id}
-                panelId={panelId}
-              />
-            ))}
-          </SortableContext>
+        className="container-body"
+        style={{ flex: "1", overflow: "visible", padding: 5, display: "flex" }}
+      >
+        <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
+          {/* TOP hitbox */}
+          <div
+            ref={top.setNodeRef}
+            style={{
+              position: "absolute",
+              left: -HIT_PAD,
+              right: -HIT_PAD,
+              top: -HIT_PAD,
+              height: EDGE + HIT_PAD,
+              pointerEvents: "none",
+              borderRadius: 10,
+            }}
+          />
 
-          {items.length === 0 && (
-            <div className="no-select" style={{ fontSize: 12, opacity: 0.6, fontStyle: "italic" }}>
-              Drop items here
-            </div>
-          )}
+
+          {/* LIST hitbox */}
+          <div
+            ref={list.setNodeRef}
+            style={{
+              position: "absolute",
+              left: -HIT_PAD,
+              right: -HIT_PAD,
+              top: EDGE,
+              bottom: EDGE,
+              pointerEvents: "none",
+              borderRadius: 10,
+            }}
+          />
+
+          {/* VISIBLE LIST */}
+          <div className="container-list" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
+            <SortableContext
+              id={`container-sortable:${container.id}`}
+              items={itemIds}
+              strategy={verticalListSortingStrategy}
+            >
+              {items.map((inst) => (
+                <SortableInstance
+                  key={inst.id}
+                  instance={inst}
+                  containerId={container.id}
+                  panelId={panelId}
+                />
+              ))}
+            </SortableContext>
+
+            {items.length === 0 && (
+              <div
+                className="no-select"
+                style={{
+                  fontSize: 12,
+                  opacity: 0.6,
+                  fontStyle: "italic",
+                  pointerEvents: "none",
+                }}
+              >
+                Drop items here
+              </div>
+            )}
+          </div>
+
+          {/* BOTTOM hitbox */}
+          <div
+            ref={bottom.setNodeRef}
+            style={{
+              position: "absolute",
+              left: -HIT_PAD,
+              right: -HIT_PAD,
+              bottom: -HIT_PAD,
+              height: EDGE + HIT_PAD,
+              pointerEvents: "none",
+              borderRadius: 10,
+            }}
+          />
         </div>
       </div>
-
-{activeInstance &&
-  createPortal(
-    <DragOverlay adjustScale={false}>
-      <div
-        style={{
-          pointerEvents: "none",
-          opacity: 0.95,
-        }}
-      >
-        <Instance
-          id={`overlay-${activeInstance.id}`}
-          label={activeInstance.label}
-          overlay
-        />
-      </div>
-    </DragOverlay>,
-    document.body
-  )}
     </div>
   );
 }
@@ -203,6 +218,19 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   const b = next.container?.items || [];
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+
+  // ✅ these must be stable references from above
+  if (prev.instancesById !== next.instancesById) return false;
+  if (prev.isDraggingContainer !== next.isDraggingContainer) return false;
+  if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
+
+  // ✅ allow hover highlight to update
+  const pr = prev.overData?.role ?? null;
+  const nr = next.overData?.role ?? null;
+  if (pr !== nr) return false;
+  const pc = prev.overData?.containerId ?? null;
+  const nc = next.overData?.containerId ?? null;
+  if (pc !== nc) return false;
 
   return true;
 });
