@@ -103,6 +103,7 @@ function GridCanvas({
 }) {
   return (
     <div
+      className="grid-wrapper"
       ref={gridRef}
       style={{
         position: "absolute",
@@ -213,14 +214,14 @@ function GridInner({ components }) {
   } = useContext(GridActionsContext);
 
   const sensors = useSensors(
-    useSensor(TouchSensor, {
-      activationConstraint: { distance: 8 },
-      eventOptions: { passive: false },
-    }),
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
-  );
+  useSensor(TouchSensor, {
+    activationConstraint: { delay: 150, tolerance: 5 },
+    eventOptions: { passive: false },
+  }),
+  useSensor(PointerSensor, {
+    activationConstraint: { distance: 6 },
+  })
+);
 
   const grid = state.grid;
   const gridId = grid?._id;

@@ -13,7 +13,7 @@ function InstanceInner({
 
   return (
     <div
-      className={"dnd-instance" + (isOriginalActive ? " hidden" : "")}
+      className={"font-mono dnd-instance" + (isOriginalActive ? " hidden" : "")}
       style={{
         touchAction: "manipulation",           // ✅ allow scroll
         WebkitUserSelect: "none",

@@ -16,25 +16,21 @@ import {
  */
 export default function ButtonPopover({
   children,
-  label = "Layout",
+  label = "Layout",          // can now be string OR <Settings />
   buttonVariant = "ghost",
-  align = "start",
+  align = "end",
   side = "bottom",
   className = "",
 }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant={buttonVariant} size="sm" aria-label={label}>
+        <Button variant={buttonVariant} size="sm" aria-label="Layout">
           {label}
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent
-        align={align}
-        side={side}
-        className={`w-80 p-3 ${className}`}
-      >
+      <PopoverContent align={align} side={side} className={`w-80 p-3 ${className}`}>
         {children}
       </PopoverContent>
     </Popover>

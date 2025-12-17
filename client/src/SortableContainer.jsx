@@ -7,10 +7,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
+import { Button } from "@/components/ui/button";
 import SortableInstance from "./SortableInstance";
-import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 
+
+import ButtonPopover from "./ui/ButtonPopover";
+
+import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 function SortableContainerInner({
   container,
   panelId,
@@ -136,34 +139,31 @@ function SortableContainerInner({
           userSelect: "none",
           flex: "0 0 auto",
           display: "flex",
-          alignItems: "center",
+          alignItems: "end",
           pointerEvents: (highlightDrop ? "none" : "auto"),
         }}
       >
         {!highlightDrop && <div
-          className="drag-handle"
-          style={{ cursor: "grab", touchAction: "none" }}
-          {...handleDragProps}
-        >
-          <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
-        </div>
+  className="drag-handle cursor-grab active:cursor-grabbing touch-none"
+  style={{touchAction: "none"}}
+  {...handleDragProps}
+>
+  <GripVertical className="h-4 w-4 text-white" />
+</div>
         }
-        <div style={{ fontWeight: 500, fontSize: "12px", padding: "0px 0px 0px 1px" }}>
+        <div className="font-mono text-[10px] sm:text-xs"
+        style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}>
           {container.label}
         </div>
 
-        {!highlightDrop && <button
-          style={{ marginLeft: "auto", touchAction: "manipulation" }}
-          onPointerDown={(e) => {
-            if (!isInstanceDrag) {
-              e.stopPropagation();
-              e.preventDefault();
-            }
-          }}
-          onClick={onAdd}
-        >
-          + Instance
-        </button>
+        {!highlightDrop &&   <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                onClick={onAdd}
+              >
+              
+  <PlusSquare className="h-4 w-4" /></Button>
         }
       </div>
 

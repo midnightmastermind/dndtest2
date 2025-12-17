@@ -10,6 +10,7 @@ import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } f
 import { Button } from "./components/ui/button"
 import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
+import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 // ----------------------------
 // memo helpers
 // ----------------------------
@@ -305,9 +306,8 @@ function Panel({
     >
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         {/* HEADER */}
-        <div
+        <div className="bg-[hsl(var(--overlay)/0.52)]"
           style={{
-            background: "#2F343A",
             borderTopLeftRadius: 8,
             borderTopRightRadius: 8,
             display: "flex",
@@ -321,30 +321,38 @@ function Panel({
           }}
         >
           <div
-            className="drag-handle"
-            style={{ cursor: "grab", paddingLeft: 6, touchAction: "none" }}
-            {...panelHandleProps}
-          >
-            <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
-          </div>
-          <ButtonPopover label="⚙">
-            <LayoutForm value={layout} onChange={setLayout} />
-          </ButtonPopover>
+  className="drag-handle cursor-grab active:cursor-grabbing pl-[8px]"
+  {...panelHandleProps}
+>
+  <GripVertical className="h-4 w-4 text-white" />
+</div>
+       
+
+
           {!isOverThisPanel && (
             <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
+              <ButtonPopover label={<Settings className="h-4 w-4" />}>
+  <LayoutForm value={layout} onChange={setLayout} />
+</ButtonPopover>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => addContainerToPanel(panel.id)}
               >
-                + Container
+              
+  <PlusSquare className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={toggleFullscreen}
               >
-                {fullscreen ? "Restore" : "Fullscreen"}
+              
+  {fullscreen ? (
+    <Minimize className="h-4 w-4" />
+  ) : (
+    <Maximize className="h-4 w-4" />
+  )}
               </Button>
             </div>
           )}
@@ -357,7 +365,7 @@ function Panel({
             flex: 1,
             minHeight: 0,
             overflow: "hidden",
-            padding: 10,
+          
             display: "flex",
             flexDirection: "column",
           }}
