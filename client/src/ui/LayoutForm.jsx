@@ -34,7 +34,7 @@ export default function LayoutForm({ value, onChange }) {
       {/* Header */}
       <div>
         <h4 className="text-sm font-semibold">Layout</h4>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-foreground">
           Configure grid placement and flow.
         </p>
       </div>

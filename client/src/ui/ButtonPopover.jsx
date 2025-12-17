@@ -18,7 +18,7 @@ export default function ButtonPopover({
   children,
   label = "Layout",
   buttonVariant = "ghost",
-  align = "end",
+  align = "start",
   side = "bottom",
   className = "",
 }) {

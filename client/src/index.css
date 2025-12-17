@@ -1,3 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
 /* --- Global reset & non-scroll root --- */
 html,
 body,
@@ -32,17 +37,17 @@ button {
   color: white;
   border: 1px solid rgb(34, 34, 34);
   border-radius: 4px;
-  padding: 4px 10px;
   font-size: 12px;
   font-family: monospace;
   cursor: pointer;
   z-index: 100;
   touch-action: manipulation;
-} 
+}
 
 .drag-handle {
   z-index: 100;
 }
+
 /* --- Layout wrappers --- */
 .app-root {
   height: 100%;
@@ -124,14 +129,14 @@ button {
 /* Make overlay not stretch */
 
 
-
 /* the area that holds the container tiles */
 .containers-col {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); /* ✅ key */
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  /* ✅ key */
   gap: 10px;
   align-content: start;
-  grid-auto-flow: row; 
+  grid-auto-flow: row;
 }
 
 /* each sortable container tile */
@@ -224,6 +229,7 @@ button {
   border: 1px solid #3a4452;
   border-radius: 6px;
 }
+
 .panel-scroll * {
   max-width: 100%;
   box-sizing: border-box;
@@ -233,7 +239,8 @@ button {
 .container-shell,
 .container-list,
 .dnd-instance {
-  min-width: 0; /* critical in flex/grid parents */
+  min-width: 0;
+  /* critical in flex/grid parents */
 }
 
 @media (max-width: 600px) {
@@ -256,12 +263,13 @@ button {
   button {
     font-size: 9px;
   }
+
   .grid-canvas {
     height: 85vh !important;
   }
 }
 
-.no-select {
+.toolbar .no-select {
   -webkit-touch-callout: none;
   /* iOS Safari */
   -webkit-user-select: none;
@@ -282,4 +290,32 @@ button {
 
 .container-shell {
   overflow: hidden !important;
+}
+
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  --border: 214 32% 91%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 210 40% 98%;
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+}
+
+.dark {
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+  --border: 0 0% 20%;
+  --popover: 220 22% 7%;
+  --popover-foreground: 210 40% 98%;
+  --background2: 215 21% 10%;
+  --input: 215 21% 11%;
+
+}
+
+html.dark {
+  color-scheme: dark;
 }

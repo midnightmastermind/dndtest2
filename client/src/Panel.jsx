@@ -7,7 +7,9 @@ import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 import { ActionTypes } from "./state/actions";
 import { emit } from "./socket";
 import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-
+import { Button } from "./components/ui/button"
+import ButtonPopover from "./ui/ButtonPopover";
+import LayoutForm from "./ui/LayoutForm";
 // ----------------------------
 // memo helpers
 // ----------------------------
@@ -58,6 +60,15 @@ function Panel({
   const SortableContainer = components["SortableContainer"];
 
   const isChildDrag = isContainerDrag || isInstanceDrag;
+
+
+  const [layout, setLayout] = React.useState({
+    flow: "row",
+    columns: 3,
+    rows: 0,
+    gap: 12,
+  });
+
 
   // ✅ panel dropzone on shell (NOT scroll)
   const {
@@ -269,9 +280,9 @@ function Panel({
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
-    ? "2px solid rgba(50,150,255,0.9)"
-    : "none";
-
+      ? "2px solid rgba(50,150,255,0.9)"
+      : "none";
+  console.log(layout);
   return (
     <div
       data-panel-id={panel.id}
@@ -316,19 +327,25 @@ function Panel({
           >
             <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
           </div>
-
+          <ButtonPopover label="⚙">
+            <LayoutForm value={layout} onChange={setLayout} />
+          </ButtonPopover>
           {!isOverThisPanel && (
             <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => addContainerToPanel(panel.id)}
-                style={{ marginRight: 6 }}
               >
                 + Container
-              </button>
-
-              <button onClick={toggleFullscreen} style={{ marginRight: 6 }}>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleFullscreen}
+              >
                 {fullscreen ? "Restore" : "Fullscreen"}
-              </button>
+              </Button>
             </div>
           )}
         </div>
