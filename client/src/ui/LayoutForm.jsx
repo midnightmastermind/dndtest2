@@ -1,18 +1,12 @@
+// LayoutForm.jsx
 import React from "react";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import FormInput from "./FormInput";
 
 /**
  * value shape:
  * {
+ *   name: string,
  *   flow: "row" | "column",
  *   columns: number,
  *   rows: number,   // 0 = auto
@@ -20,94 +14,89 @@ import { Separator } from "@/components/ui/separator";
  * }
  */
 export default function LayoutForm({ value, onChange }) {
-  const update = (patch) => {
-    onChange({ ...value, ...patch });
-  };
-
-  const safeNum = (raw, fallback) => {
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : fallback;
-  };
-
   return (
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <h4 className="text-sm font-semibold">Layout</h4>
-        <p className="text-xs text-foreground">
+        <h4 className="text-sm font-semibold text-foreground">Layout</h4>
+        <p className="text-xs text-muted-foreground">
           Configure grid placement and flow.
         </p>
       </div>
 
       <Separator />
 
-      {/* Auto-flow */}
-      <div className="space-y-1.5">
-        <Label>Flow direction</Label>
-        <Select
-          value={value.flow}
-          onValueChange={(v) => update({ flow: v })}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="row">Row (left → right)</SelectItem>
-            <SelectItem value="column">Column (top → bottom)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Name */}
+      <FormInput
+        schema={{
+          type: "text-input",
+          key: "name",
+          label: "Name",
+          placeholder: "Panel layout name",
+        }}
+        value={value}
+        onChange={onChange}
+      />
+
+      <Separator />
+
+      {/* Flow */}
+      <FormInput
+        schema={{
+          type: "select",
+          key: "flow",
+          label: "Flow direction",
+          placeholder: "Pick a flow…",
+          options: [
+            { value: "row", label: "Row (left → right)" },
+            { value: "column", label: "Column (top → bottom)" },
+          ],
+        }}
+        value={value}
+        onChange={onChange}
+      />
 
       {/* Columns */}
-      <div className="space-y-1.5">
-        <Label>Columns</Label>
-        <Input
-          type="number"
-          min={1}
-          max={24}
-          value={value.columns}
-          onChange={(e) =>
-            update({ columns: Math.max(1, safeNum(e.target.value, 1)) })
-          }
-        />
-        <p className="text-xs text-muted-foreground">
-          Number of columns in the grid.
-        </p>
-      </div>
+      <FormInput
+        schema={{
+          type: "number-input",
+          key: "columns",
+          label: "Columns",
+          min: 1,
+          max: 24,
+          description: "Number of columns in the grid.",
+        }}
+        value={value}
+        onChange={onChange}
+      />
 
       {/* Rows */}
-      <div className="space-y-1.5">
-        <Label>Rows</Label>
-        <Input
-          type="number"
-          min={0}
-          max={24}
-          value={value.rows}
-          onChange={(e) =>
-            update({ rows: Math.max(0, safeNum(e.target.value, 0)) })
-          }
-        />
-        <p className="text-xs text-muted-foreground">
-          Set to <strong>0</strong> for automatic rows.
-        </p>
-      </div>
+      <FormInput
+        schema={{
+          type: "number-input",
+          key: "rows",
+          label: "Rows",
+          min: 0,
+          max: 24,
+          description: "Set to 0 for automatic rows.",
+        }}
+        value={value}
+        onChange={onChange}
+      />
 
       {/* Gap */}
-      <div className="space-y-1.5">
-        <Label>Gap (px)</Label>
-        <Input
-          type="number"
-          min={0}
-          max={64}
-          value={value.gap}
-          onChange={(e) =>
-            update({ gap: Math.max(0, safeNum(e.target.value, 0)) })
-          }
-        />
-        <p className="text-xs text-muted-foreground">
-          Space between items.
-        </p>
-      </div>
+      <FormInput
+        schema={{
+          type: "number-input",
+          key: "gap",
+          label: "Gap (px)",
+          min: 0,
+          max: 64,
+          description: "Space between items.",
+        }}
+        value={value}
+        onChange={onChange}
+      />
     </div>
   );
 }

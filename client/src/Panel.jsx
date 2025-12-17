@@ -63,12 +63,13 @@ function Panel({
   const isChildDrag = isContainerDrag || isInstanceDrag;
 
 
-  const [layout, setLayout] = React.useState({
-    flow: "row",
-    columns: 3,
-    rows: 0,
-    gap: 12,
-  });
+  const [layout, setLayout] = useState({
+  name: "",
+  flow: "row",
+  columns: 3,
+  rows: 0,
+  gap: 12,
+});
 
 
   // ✅ panel dropzone on shell (NOT scroll)
