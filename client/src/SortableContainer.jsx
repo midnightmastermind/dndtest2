@@ -48,7 +48,7 @@ function SortableContainerInner({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0 : 1,
-    pointerEvents: isDragging ? "none" : "auto",
+    pointerEvents: isDragging ? "none" : "auto"
   };
 
   const items = useMemo(() => {
@@ -90,20 +90,21 @@ function SortableContainerInner({
     },
   });
 
-  const EDGE = 15;
-  const HIT_PAD = 30;
-
+  const EDGE = 30;
+  const HIT_PAD = 20;
+  const INSET_X = 10; // match your real padding
+  const DEBUG_HITBOXES = false;
   const roleStr = typeof overData?.role === "string" ? overData.role : "";
   const isOverThisContainer =
     (roleStr.startsWith("container:") && overData?.containerId === container.id) ||
     (roleStr === "instance" && overData?.containerId === container.id);
 
   const highlightDrop = isInstanceDrag && isOverThisContainer;
-// inside SortableContainerInner()
+  // inside SortableContainerInner()
 
-const handleDragProps = isInstanceDrag
-  ? {} // ✅ do NOT attach activators during instance drag
-  : { ...attributes, ...listeners };
+  const handleDragProps = isInstanceDrag
+    ? {} // ✅ do NOT attach activators during instance drag
+    : { ...attributes, ...listeners };
   return (
     <div
       ref={setNodeRef}
@@ -146,24 +147,24 @@ const handleDragProps = isInstanceDrag
         >
           <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
         </div>
-}
-        <div style={{ fontWeight: 600, padding: "0px 0px 0px 10px" }}>
+        }
+        <div style={{ fontWeight: 500, fontSize: "12px", padding: "0px 0px 0px 1px" }}>
           {container.label}
         </div>
 
         {!highlightDrop && <button
-  style={{ marginLeft: "auto", touchAction: "manipulation" }}
-  onPointerDown={(e) => {
-    if (!isInstanceDrag) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-  }}
-  onClick={onAdd}
->
-  + Instance
-</button>
-}
+          style={{ marginLeft: "auto", touchAction: "manipulation" }}
+          onPointerDown={(e) => {
+            if (!isInstanceDrag) {
+              e.stopPropagation();
+              e.preventDefault();
+            }
+          }}
+          onClick={onAdd}
+        >
+          + Instance
+        </button>
+        }
       </div>
 
       {/* BODY */}
@@ -177,12 +178,16 @@ const handleDragProps = isInstanceDrag
             ref={top.setNodeRef}
             style={{
               position: "absolute",
-              left: -HIT_PAD,
-              right: -HIT_PAD,
-              top: -HIT_PAD,
-              height: EDGE + HIT_PAD,
+              left: -13,
+              right: -13,
+              top: -47,
+              height: 55,
               pointerEvents: "none",
               borderRadius: 10,
+              background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
+
+              maxWidth: "unset",
+
             }}
           />
 
@@ -191,12 +196,15 @@ const handleDragProps = isInstanceDrag
             ref={list.setNodeRef}
             style={{
               position: "absolute",
-              left: -HIT_PAD,
-              right: -HIT_PAD,
-              top: EDGE,
-              bottom: EDGE,
+              left: -13,
+              right: -13,
+              top: 0,
+              bottom: 20,
               pointerEvents: "none",
+              background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
+
               borderRadius: 10,
+              maxWidth: "unset",
             }}
           />
 
@@ -240,12 +248,16 @@ const handleDragProps = isInstanceDrag
             ref={bottom.setNodeRef}
             style={{
               position: "absolute",
-              left: -HIT_PAD,
-              right: -HIT_PAD,
-              bottom: -HIT_PAD,
-              height: EDGE + HIT_PAD,
+              left: -15,
+              right: -15,
+              bottom: -9,
+              height: 34,
               pointerEvents: "none",
+              background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
+
               borderRadius: 10,
+              maxWidth: "unset"
+
             }}
           />
         </div>

@@ -40,7 +40,6 @@ export default function Toolbar({
   };
 
   const labelStyle = { color: "#9aa4b2", fontSize: 11 };
-  console.log(gridName)
   return (
     <div
       style={{

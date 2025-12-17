@@ -6,9 +6,29 @@ import { token } from "@atlaskit/tokens";
 import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 import { ActionTypes } from "./state/actions";
 import { emit } from "./socket";
-import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 
-export default function Panel({
+// ----------------------------
+// memo helpers
+// ----------------------------
+function sameIdList(a = [], b = []) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function pickOverKey(overData) {
+  if (!overData) return "";
+  const role =
+    typeof overData.role === "string"
+      ? overData.role
+      : String(overData.role ?? "");
+  return `${role}|${overData.panelId ?? ""}|${overData.containerId ?? ""}`;
+}
+
+function Panel({
   panel,
   components,
   dispatch,
@@ -39,19 +59,13 @@ export default function Panel({
 
   const isChildDrag = isContainerDrag || isInstanceDrag;
 
-  // ✅ IMPORTANT FIX #1:
-  // Create the panel dropzone, BUT do NOT attach it to the scroll div.
-  // Attach it to the PANEL SHELL (outer div), otherwise empty panel hover often fails.
-  //
-  // ✅ IMPORTANT FIX #2:
-  // Disable dropzone during INSTANCE drag so instance drags don’t “hit” panelDrop.
+  // ✅ panel dropzone on shell (NOT scroll)
   const {
     setNodeRef: setPanelDropRef,
     isOver: isOverPanelDrop,
   } = useDroppable({
     id: `panelDrop:${panel.id}`,
     data: { role: "panel:drop", panelId: panel.id },
-    disabled: isInstanceDrag, // ✅ KEY: block instance drags from panel dropzone
   });
 
   const containerIdBelongsToPanel = (containerId) =>
@@ -60,8 +74,12 @@ export default function Panel({
   const isOverThisPanel = (() => {
     if (!overData) return false;
 
-    if (overData.role === "panel:drop" && overData.panelId === panel.id) return true;
-    if (overData.role === "container" && overData.panelId === panel.id) return true;
+    if (overData.role?.includes?.("instance") && overData.panelId === panel.id)
+      return true;
+    if (overData.role?.includes?.("panel") && overData.panelId === panel.id)
+      return true;
+    if (overData.role?.includes?.("container") && overData.panelId === panel.id)
+      return true;
 
     const roleStr = typeof overData.role === "string" ? overData.role : "";
     const isContainerZone = roleStr.startsWith("container:");
@@ -74,7 +92,8 @@ export default function Panel({
   })();
 
   const collapsed = activeId === panel.id;
-  const highlightPanel = isContainerDrag && (isOverPanelDrop || isOverThisPanel) && !collapsed;
+  const highlightPanel =
+    isContainerDrag && (isOverPanelDrop || isOverThisPanel) && !collapsed;
 
   const data = useMemo(
     () => ({
@@ -85,7 +104,7 @@ export default function Panel({
       width: panel.width,
       height: panel.height,
     }),
-    [panel]
+    [panel.id, panel.col, panel.row, panel.width, panel.height]
   );
 
   const { setNodeRef: setPanelDragRef, attributes, listeners } = useDraggable({
@@ -94,7 +113,7 @@ export default function Panel({
     disabled: fullscreen,
   });
 
-const { active, measureDroppableContainers } = useDndContext();
+  const { active, measureDroppableContainers } = useDndContext();
 
   const scrollTimeoutRef = useRef(null);
 
@@ -102,21 +121,15 @@ const { active, measureDroppableContainers } = useDndContext();
     const role = active?.data?.current?.role;
     if (role !== "instance") return;
 
-    // Clear previous pending measure
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
 
-    // Measure AFTER scrolling pauses
     scrollTimeoutRef.current = setTimeout(() => {
       measureDroppableContainers();
       scrollTimeoutRef.current = null;
-    }, 80); // 60–120ms works well on mobile
+    }, 80);
   }, [active, measureDroppableContainers]);
 
-  // ✅ IMPORTANT FIX #3:
-  // Merge draggable + droppable refs on the OUTER PANEL DIV (shell).
-  // This is what makes “empty panel hover” work reliably.
+  // ✅ merge droppable + draggable refs on shell
   const setPanelShellRef = useCallback(
     (node) => {
       setPanelDragRef(node);
@@ -252,21 +265,27 @@ const { active, measureDroppableContainers } = useDndContext();
 
   const panelHandleProps = isChildDrag ? {} : { ...attributes, ...listeners };
 
+  // ✅ fix: single outline value (don't overwrite highlight with resize)
+  const outlineStyle = isResizing
+    ? "2px solid rgba(50,150,255,0.6)"
+    : highlightPanel
+    ? "2px solid rgba(50,150,255,0.9)"
+    : "none";
+
   return (
     <div
       data-panel-id={panel.id}
-      ref={setPanelShellRef} // ✅ DROPPABLE + DRAGGABLE ON SHELL (fix)
+      ref={setPanelShellRef}
       style={{
         gridArea,
         background: token("elevation.surface", "rgba(17,17,17,0.95)"),
         borderRadius: 8,
-        border: highlightPanel ? "2px solid rgba(50,150,255,0.9)" : "1px solid #AAA",
-        boxShadow: highlightPanel ? "0 0 0 3px rgba(50,150,255,0.35) inset" : "none",
+        outline: outlineStyle,
+        outlineOffset: "-2px",
         overflow: "hidden",
         position: "relative",
         margin: "3px",
         transition: isResizing ? "all 80ms linear" : "none",
-        outline: isResizing ? "2px solid rgba(50,150,255,0.6)" : "none",
         opacity: collapsed ? 0 : 1,
         visibility: collapsed ? "hidden" : "visible",
         pointerEvents: collapsed ? "none" : "auto",
@@ -287,35 +306,47 @@ const { active, measureDroppableContainers } = useDndContext();
             flex: "0 0 auto",
             position: "relative",
             zIndex: fullscreen ? 999 : 1,
+            height: 24,
           }}
         >
           <div
             className="drag-handle"
             style={{ cursor: "grab", paddingLeft: 6, touchAction: "none" }}
-          {...panelHandleProps}
+            {...panelHandleProps}
           >
             <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
           </div>
 
-          <div style={{ flex: 1 }} />
+          {!isOverThisPanel && (
+            <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
+              <button
+                onClick={() => addContainerToPanel(panel.id)}
+                style={{ marginRight: 6 }}
+              >
+                + Container
+              </button>
 
-          <button onClick={() => addContainerToPanel(panel.id)} style={{ marginRight: 6 }}>
-            + Container
-          </button>
-
-          <button onClick={toggleFullscreen} style={{ marginRight: 6 }}>
-            {fullscreen ? "Restore" : "Fullscreen"}
-          </button>
+              <button onClick={toggleFullscreen} style={{ marginRight: 6 }}>
+                {fullscreen ? "Restore" : "Fullscreen"}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* BODY */}
         <div
           className="panel-body"
-          style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+            padding: 10,
+            display: "flex",
+            flexDirection: "column",
+          }}
         >
-          <div style={{ height: 18 }} />
+          <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
-          {/* ✅ KEEP your scroll container — BUT it is NOT the droppable ref anymore */}
           <div
             data-panelid={panel.id}
             className="panel-scroll"
@@ -331,7 +362,7 @@ const { active, measureDroppableContainers } = useDndContext();
               position: "relative",
             }}
           >
-            <div style={{ padding: 14, boxSizing: "border-box" }}>
+            <div style={{ boxSizing: "border-box" }}>
               <div className="containers-col">
                 <SortableContext
                   items={panelContainerIds}
@@ -346,7 +377,7 @@ const { active, measureDroppableContainers } = useDndContext();
                       instancesById={instancesById}
                       addInstanceToContainer={addInstanceToContainer}
                       isDraggingContainer={isContainerDrag}
-                       isInstanceDrag={isInstanceDrag}
+                      isInstanceDrag={isInstanceDrag}
                       overData={overData}
                     />
                   ))}
@@ -364,12 +395,6 @@ const { active, measureDroppableContainers } = useDndContext();
                       height: 80,
                       margin: 12,
                       borderRadius: 10,
-                      border: isOverPanelDrop
-                        ? "2px solid rgba(50,150,255,0.9)"
-                        : "2px dashed rgba(50,150,255,0.6)",
-                      boxShadow: isOverPanelDrop
-                        ? "0 0 0 3px rgba(50,150,255,0.25) inset"
-                        : "none",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -383,10 +408,9 @@ const { active, measureDroppableContainers } = useDndContext();
                 )}
               </div>
             </div>
-
-           
           </div>
-          <div style={{ height: 18 }} />
+
+          <div style={{ height: 20, zIndex: 1 }} />
         </div>
 
         <ResizeHandle onMouseDown={beginResize} onTouchStart={beginResize} />
@@ -395,4 +419,35 @@ const { active, measureDroppableContainers } = useDndContext();
   );
 }
 
+export default React.memo(Panel, (prev, next) => {
+  // Panel identity
+  if (prev.panel?.id !== next.panel?.id) return false;
 
+  // Position/size changes must re-render
+  if (prev.panel?.row !== next.panel?.row) return false;
+  if (prev.panel?.col !== next.panel?.col) return false;
+  if (prev.panel?.width !== next.panel?.width) return false;
+  if (prev.panel?.height !== next.panel?.height) return false;
+
+  // Container ordering in this panel must re-render (SortableContext depends on it)
+  if (!sameIdList(prev.panel?.containers, next.panel?.containers)) return false;
+
+  // Drag state that affects header + highlight
+  if (prev.activeId !== next.activeId) return false;
+  if (prev.isContainerDrag !== next.isContainerDrag) return false;
+  if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
+
+  // Hover/highlight routing (minimal key)
+  if (pickOverKey(prev.overData) !== pickOverKey(next.overData)) return false;
+
+  // These affect render output
+  if (prev.cols !== next.cols) return false;
+  if (prev.rows !== next.rows) return false;
+  // Instances map changes must re-render so lists show new items immediately
+  if (prev.instancesById !== next.instancesById) return false;
+
+  // (optional, but usually needed too)
+  if (prev.containersSource !== next.containersSource) return false;
+
+  return true;
+});

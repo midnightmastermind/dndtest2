@@ -50,9 +50,10 @@ function ContainerClone({ container }) {
 /* ------------------------------------------------------------
    DROPPABLE GRID CELL
 ------------------------------------------------------------ */
-function CellDroppable({ r, c, dark, highlight }) {
+function CellDroppable({ r, c, dark, highlight, disabled  }) {
   const { setNodeRef } = useDroppable({
     id: `cell-${r}-${c}`,
+    disabled,
     data: { role: "grid:cell", row: r, col: c },
   });
 
@@ -68,8 +69,8 @@ function CellDroppable({ r, c, dark, highlight }) {
         background: highlight
           ? "rgba(50,150,255,0.45)"
           : dark
-          ? "#22272B"
-          : "#2C333A",
+            ? "#22272B"
+            : "#2C333A",
         border: "1px solid #3F444A",
         transition: "background 80ms",
       }}
@@ -98,6 +99,7 @@ function GridCanvas({
   getRowPosition,
   highlightCellId,
   panelProps,
+  activeRole
 }) {
   return (
     <div
@@ -109,7 +111,7 @@ function GridCanvas({
         gridTemplateColumns: colTemplate,
         gridTemplateRows: rowTemplate,
         width: "100%",
-        height: "85vh",
+        height: "95vh",
         overflow: "hidden",
         touchAction: "none",
         overscrollBehaviorY: "none",
@@ -126,6 +128,8 @@ function GridCanvas({
               c={c}
               dark={dark}
               highlight={cellId === highlightCellId}
+                disabled={activeRole !== "panel"}  // <- huge win
+
             />
           );
         })
@@ -367,31 +371,38 @@ function GridInner({ components }) {
     event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
 
   const collisionDetection = useMemo(() => {
-  return (args) => {
-    const role = args.active?.data?.current?.role;
+    return (args) => {
+      const role = args.active?.data?.current?.role;
 
-    if (role === "panel") {
-      return panelOverCellId ? [{ id: panelOverCellId }] : [];
-    }
+      if (role === "panel") {
+        return panelOverCellId ? [{ id: panelOverCellId }] : [];
+      }
 
-    const hits = pointerWithin(args);
-    const fallback = hits.length ? hits : closestCenter(args);
+      const hits = pointerWithin(args);
+      const fallback = hits.length ? hits : closestCenter(args);
+      if (role === "instance") {
+        const hits = pointerWithin(args);
 
-    if (role === "instance") {
-      const filtered = fallback.filter((c) => {
-        const r = c?.data?.droppableContainer?.data?.current?.role;
-        if (!r) return false;
+        const listTargets = hits.filter((c) => {
+          const r = c?.data?.droppableContainer?.data?.current?.role;
+          return r === "instance" || String(r).startsWith("container:");
+        });
 
-        return r === "instance" || String(r).startsWith("container:");
-      });
+        if (listTargets.length) return listTargets;
 
-      // ✅ KEY: do NOT return fallback if filtered is empty
-      return filtered;
-    }
+        // ✅ fallback to panel drop ONLY if not over any list target
+        const panelTargets = hits.filter((c) => {
+          const r = c?.data?.droppableContainer?.data?.current?.role;
+          return r === "panel:drop";
+        });
 
-    return fallback;
-  };
-}, [panelOverCellId]);
+        return panelTargets; // might be []
+      }
+
+
+      return fallback;
+    };
+  }, [panelOverCellId]);
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
@@ -443,7 +454,8 @@ function GridInner({ components }) {
       const r = safe?.role;
       const ok =
         r === "instance" ||
-        (typeof r === "string" && r.startsWith("container:"));
+        (typeof r === "string" && r.startsWith("container:")) ||
+        r === "panel:drop"; // ✅ allow as “hover signal”
       safe = ok ? safe : null;
     }
 
@@ -699,8 +711,6 @@ function GridInner({ components }) {
     ]
   );
 
-  if (!grid?._id) return <div>Loading grid…</div>;
-
   return (
     <DndContext
       sensors={sensors}
@@ -709,7 +719,7 @@ function GridInner({ components }) {
       autoScroll={{
         enabled: true,
         threshold: { x: 0.15, y: 0.15 },
-        acceleration: 20,
+        acceleration: 25,
       }}
       onDragStart={handleDragStart}
       onDragMove={handleDragMove}
@@ -743,6 +753,7 @@ function GridInner({ components }) {
           getRowPosition={getRowPosition}
           highlightCellId={panelOverCellId}
           panelProps={panelProps}
+          activeRole={activeRole}
         />
       </div>
 

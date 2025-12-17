@@ -128,22 +128,15 @@ button {
 /* the area that holds the container tiles */
 .containers-col {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  align-content: start;
-  height: auto;
-  /* ✅ let it grow */
-  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); /* ✅ key */
   gap: 10px;
-  /* ✅ important in flex parents */
-  grid-auto-rows: auto;
-  /* ✅ rows grow to content */
-
+  align-content: start;
+  grid-auto-flow: row; 
 }
 
 /* each sortable container tile */
 .container-shell {
   min-width: 0;
-  width: 100%;
   min-height: 126px;
   /* visual spacing */
   box-sizing: border-box;
@@ -176,6 +169,7 @@ button {
   padding: 5px;
   border-bottom: 1px solid #222;
   cursor: grab;
+  height: 24px;
 }
 
 .container-list {
@@ -287,5 +281,5 @@ button {
 
 
 .container-shell {
-  overflow: visible;
+  overflow: hidden !important;
 }

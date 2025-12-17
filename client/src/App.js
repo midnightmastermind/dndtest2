@@ -278,7 +278,7 @@ export default function App() {
       handleDragEnd,
       handleDragCancel,
 
-      
+
     }),
     [
       socket,
@@ -302,7 +302,7 @@ export default function App() {
     []
   );
 
-  
+
 
   if (!state.userId) return <LoginScreen />;
 
@@ -333,7 +333,14 @@ export default function App() {
           debugEvent={state.debugEvent}
         />
 
-        <div className="app-root">{state.grid && <Grid components={components} />}</div>
+        <div className="app-root">
+          {state.grid?._id ? (
+            <Grid components={components} />)
+            : (
+              <div>Loading grid…</div>
+            )
+          }
+        </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>
   );
