@@ -1,5 +1,5 @@
 // App.jsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { socket } from "./socket";
 import { bindSocketToStore } from "./state/bindSocketToStore";
@@ -26,7 +26,6 @@ import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
 import Toolbar from "./Toolbar";
 
-
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
   for (let r = 0; r < rows; r++) {
@@ -41,6 +40,9 @@ function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
 export default function App() {
   const { state, dispatch } = useBoardState();
 
+  // ✅ single shared live pointer ref for EVERYTHING (GridInner + coordinator)
+  const livePointerRef = useRef({ x: null, y: null });
+
   // ✅ local tick for drag preview rendering (no reducer writes)
   const [dragTick, setDragTick] = useState(0);
   const scheduleSoftTick = useCallback(() => {
@@ -53,12 +55,13 @@ export default function App() {
     handleDragEnd,
     handleDragCancel,
     containersDraftRef,
-    getWorkingContainers
+    getWorkingContainers,
   } = useDndReorderCoordinator({
     state,
     dispatch,
     socket,
-    scheduleSoftTick, // ✅ NEW
+    pointerRef: livePointerRef,
+    scheduleSoftTick,
   });
 
   // ✅ containers used for rendering (draft during drag, real otherwise)
@@ -105,7 +108,10 @@ export default function App() {
       didRequest = true;
 
       const savedGridId = localStorage.getItem("moduli-gridId");
-      socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
+      socket.emit(
+        "request_full_state",
+        savedGridId ? { gridId: savedGridId } : undefined
+      );
     };
 
     if (socket.connected) request();
@@ -224,7 +230,6 @@ export default function App() {
   // -----------------------------
   // CONTEXT VALUES
   // -----------------------------
-  // ✅ DATA context: ONLY what containers/panels need to render
   const dataValue = useMemo(
     () => ({
       state: {
@@ -239,7 +244,7 @@ export default function App() {
         softTick: state.softTick,
       },
       containersRender,
-      dragTick
+      dragTick,
     }),
     [
       state.userId,
@@ -252,12 +257,10 @@ export default function App() {
       state.activeSize,
       state.softTick,
       containersRender,
-      dragTick
+      dragTick,
     ]
   );
 
-
-  // ✅ ACTIONS context: functions + instancesById (stable-ish)
   const actionsValue = useMemo(
     () => ({
       socket,
@@ -269,12 +272,12 @@ export default function App() {
       addContainerToPanel,
       addInstanceToContainer,
 
+      pointerRef: livePointerRef,
+
       handleDragStart,
       handleDragOver,
       handleDragEnd,
       handleDragCancel,
-
-
     }),
     [
       socket,
@@ -282,6 +285,7 @@ export default function App() {
       instancesById,
       addContainerToPanel,
       addInstanceToContainer,
+      livePointerRef, // ✅ include so it's never accidentally stale
       handleDragStart,
       handleDragOver,
       handleDragEnd,
@@ -297,8 +301,6 @@ export default function App() {
     }),
     []
   );
-
-
 
   if (!state.userId) return <LoginScreen />;
 
@@ -323,12 +325,7 @@ export default function App() {
         />
 
         <div className="app-root grid-frame bg-background2 ring-1 ring-black/40 rounded-xl p-3 shadow-inner border border-border">
-          {state.grid?._id ? (
-            <Grid components={components} />)
-            : (
-              <div>Loading grid…</div>
-            )
-          }
+          {state.grid?._id ? <Grid components={components} /> : <div>Loading grid…</div>}
         </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>

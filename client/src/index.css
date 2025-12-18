@@ -240,8 +240,8 @@ button {
     font-size: 9px;
   }
 
-  .grid-canvas {
-    height: 85vh !important;
+  .grid-wrapper {
+    height: 90vh !important;
   }
 }
 
