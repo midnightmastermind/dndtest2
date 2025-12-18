@@ -15,11 +15,11 @@ import FormInput from "./FormInput";
  */
 export default function LayoutForm({ value, onChange }) {
   return (
-    <div className="space-y-4">
+    <div className="font-mono">
       {/* Header */}
       <div>
-        <h4 className="text-sm font-semibold text-foreground">Layout</h4>
-        <p className="text-xs text-muted-foreground">
+        <h4 className="text-sm font-semibold text-white">Panel Settings</h4>
+        <p className="text-[11px] pt-[2px] text-foregroundScale-2">
           Configure grid placement and flow.
         </p>
       </div>
@@ -38,8 +38,6 @@ export default function LayoutForm({ value, onChange }) {
         onChange={onChange}
       />
 
-      <Separator />
-
       {/* Flow */}
       <FormInput
         schema={{
@@ -55,6 +53,7 @@ export default function LayoutForm({ value, onChange }) {
         value={value}
         onChange={onChange}
       />
+      <div className="grid pt-[5px] grid-cols-3 gap-3">
 
       {/* Columns */}
       <FormInput
@@ -97,6 +96,7 @@ export default function LayoutForm({ value, onChange }) {
         value={value}
         onChange={onChange}
       />
+      </div>
     </div>
   );
 }

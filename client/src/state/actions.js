@@ -72,11 +72,10 @@ export const ActionTypes = {
   CREATE_INSTANCE_IN_CONTAINER: "CREATE_INSTANCE_IN_CONTAINER",
 
   // ------------------------------------------------------
-  // DnD / UI debug
+  // DnD
   // ------------------------------------------------------
   SET_ACTIVE_ID: "SET_ACTIVE_ID",
   SET_ACTIVE_SIZE: "SET_ACTIVE_SIZE",
-  SET_DEBUG_EVENT: "SET_DEBUG_EVENT",
   SOFT_TICK: "SOFT_TICK",
 };
 
@@ -214,11 +213,6 @@ export const setActiveIdAction = (activeId) => ({
 export const setActiveSizeAction = (activeSize) => ({
   type: ActionTypes.SET_ACTIVE_SIZE,
   payload: { activeSize },
-});
-
-export const setDebugEventAction = (debugEvent) => ({
-  type: ActionTypes.SET_DEBUG_EVENT,
-  payload: { debugEvent },
 });
 
 export const softTickAction = () => ({

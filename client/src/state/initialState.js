@@ -20,9 +20,6 @@ export const initialState = {
   activeId: null,
   activeSize: null,
 
-  // debug
-  debugEvent: null,
-
   // rerender tick for draft-ref driven soft-sort
   softTick: 0,
 

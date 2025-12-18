@@ -1,8 +1,5 @@
 // App.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Textfield from "@atlaskit/textfield";
-import Button from "@atlaskit/button";
-import { Label } from "@atlaskit/form";
 
 import { socket } from "./socket";
 import { bindSocketToStore } from "./state/bindSocketToStore";
@@ -27,7 +24,6 @@ import { useDndReorderCoordinator } from "./helpers/useDndReorderCoordinator";
 import SortableContainer from "./SortableContainer";
 import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
-import Debugbar from "./Debugbar";
 import Toolbar from "./Toolbar";
 
 
@@ -240,10 +236,10 @@ export default function App() {
         instances: state.instances,
         activeId: state.activeId,
         activeSize: state.activeSize,
-        debugEvent: state.debugEvent,
         softTick: state.softTick,
       },
       containersRender,
+      dragTick
     }),
     [
       state.userId,
@@ -254,9 +250,9 @@ export default function App() {
       state.instances,
       state.activeId,
       state.activeSize,
-      state.debugEvent,
       state.softTick,
       containersRender,
+      dragTick
     ]
   );
 
@@ -326,14 +322,7 @@ export default function App() {
           onAddPanel={addNewPanel}
         />
 
-        <Debugbar
-          containers={state.containers}
-          containersDraft={containersDraftRef.current}
-          activeId={state.activeId}
-          debugEvent={state.debugEvent}
-        />
-
-        <div className="app-root">
+        <div className="app-root grid-frame bg-background2 ring-1 ring-black/40 rounded-xl p-3 shadow-inner border border-border">
           {state.grid?._id ? (
             <Grid components={components} />)
             : (

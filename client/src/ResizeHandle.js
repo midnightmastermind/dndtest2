@@ -13,6 +13,8 @@ const ResizeHandle = ({ onMouseDown, onTouchStart }) => {
         background: "rgba(3, 2, 2, 0.52)",
         borderTopLeftRadius: 6,
         touchAction: "none",
+        zIndex: 9999,          // ✅ ensure it's above scroll content
+        pointerEvents: "auto",  // ✅ explicit
       }}
     />
   );

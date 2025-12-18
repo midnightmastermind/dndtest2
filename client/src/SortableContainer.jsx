@@ -10,9 +10,6 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import SortableInstance from "./SortableInstance";
 
-
-import ButtonPopover from "./ui/ButtonPopover";
-
 import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 function SortableContainerInner({
   container,
@@ -44,6 +41,10 @@ function SortableContainerInner({
       containerId: container.id,
       panelId,
       label: container.label,
+    },
+    transition: {
+      duration: 120,
+      easing: "cubic-bezier(0.25, 1, 0.5, 1)",
     },
   });
 
@@ -123,14 +124,11 @@ function SortableContainerInner({
           : "0px solid transparent",
         outlineOffset: 0,
 
-        // keep your inset glow (doesn't affect layout)
-        boxShadow: highlightDrop
-          ? "0 0 0 3px rgba(50,150,255,0.25) inset"
-          : undefined,
 
         borderRadius: 10,
       }}
-      className="container-shell"
+      className="container-shell bg-background2 rounded-md border border-border shadow-inner"
+
     >
       {/* HEADER */}
       <div
@@ -143,28 +141,29 @@ function SortableContainerInner({
           pointerEvents: (highlightDrop ? "none" : "auto"),
         }}
       >
-        {!highlightDrop && <div
-  className="drag-handle cursor-grab active:cursor-grabbing touch-none"
-  style={{touchAction: "none"}}
-  {...handleDragProps}
->
-  <GripVertical className="h-4 w-4 text-white" />
-</div>
-        }
+        <div
+          className="drag-handle cursor-grab active:cursor-grabbing touch-none"
+          style={{ touchAction: "none" }}
+          {...handleDragProps}
+        >
+          <GripVertical className="h-4 w-4 text-white" />
+        </div>
+
         <div className="font-mono text-[10px] sm:text-xs"
-        style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}>
+          style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}>
           {container.label}
         </div>
 
-        {!highlightDrop &&   <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto"
-                onClick={onAdd}
-              >
-              
-  <PlusSquare className="h-4 w-4" /></Button>
-        }
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto"
+          onClick={onAdd}
+        >
+
+          <PlusSquare className="h-4 w-4 mr-[1px]" /> Instance
+        </Button>
+
       </div>
 
       {/* BODY */}
@@ -180,12 +179,12 @@ function SortableContainerInner({
               position: "absolute",
               left: -13,
               right: -13,
-              top: -47,
-              height: 55,
+              top: -45,
+              height: 95,
               pointerEvents: "none",
               borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-
+              zIndex: 2,
               maxWidth: "unset",
 
             }}
@@ -198,11 +197,11 @@ function SortableContainerInner({
               position: "absolute",
               left: -13,
               right: -13,
-              top: 0,
-              bottom: 20,
+              top: 50,
+              bottom: 48,
               pointerEvents: "none",
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-
+              zIndex: 1,
               borderRadius: 10,
               maxWidth: "unset",
             }}
@@ -210,8 +209,8 @@ function SortableContainerInner({
 
           {/* VISIBLE LIST */}
           <div
-            className="container-list"
-            style={{ position: "relative", zIndex: 1, overflow: "visible" }}
+            className="container-list instance-pocket"
+            style={{ position: "relative", zIndex: 2, overflow: "visible" }}
           >
             <SortableContext
               id={`container-sortable:${container.id}`}
@@ -228,19 +227,7 @@ function SortableContainerInner({
               ))}
             </SortableContext>
 
-            {items.length === 0 && (
-              <div
-                className="no-select"
-                style={{
-                  fontSize: 12,
-                  opacity: 0.6,
-                  fontStyle: "italic",
-                  pointerEvents: "none",
-                }}
-              >
-                Drop items here
-              </div>
-            )}
+
           </div>
 
           {/* BOTTOM hitbox */}
@@ -250,8 +237,9 @@ function SortableContainerInner({
               position: "absolute",
               left: -15,
               right: -15,
-              bottom: -9,
-              height: 34,
+              bottom: -7,
+              height: 55,
+              zIndex: 2,
               pointerEvents: "none",
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
 

@@ -8,7 +8,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default: "bg-inputScale-2 text-white border border-borderScale-0 rounded cursor-pointer z-[100] touch-manipulation hover:bg-inputScale-2/90",
         ghost: "hover:bg-accent hover:text-accent-foreground",
       },
       size: {

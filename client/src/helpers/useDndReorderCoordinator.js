@@ -1,11 +1,8 @@
 import { useCallback, useMemo, useRef, useEffect } from "react";
 import {
-  createContainerAction,
-  createInstanceInContainerAction,
   setActiveIdAction,
   setActiveSizeAction,
   setContainersAction,
-  setDebugEventAction,
   softTickAction,
   updatePanelAction,
 } from "../state/actions";
@@ -17,9 +14,6 @@ const ACCEPTS = {
 };
 
 // ---------- utilities ----------
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-}
 
 function arrayMove(arr, from, to) {
   const copy = [...arr];
@@ -30,38 +24,6 @@ function arrayMove(arr, from, to) {
 
 function deepCloneContainers(containers) {
   return (containers || []).map((c) => ({ ...c, items: [...(c.items || [])] }));
-}
-
-// ✅ Safe event snapshot for debug UI (no circular refs)
-function pickEvent(event, type) {
-  const a = event?.active;
-  const o = event?.over;
-
-  const activeData = a?.data?.current || null;
-  const overData = o?.data?.current || null;
-
-  return {
-    type,
-    ts: Date.now(),
-    active: a
-      ? {
-        id: a.id,
-        role: activeData?.role ?? null,
-        containerId: activeData?.containerId ?? null,
-        panelId: activeData?.panelId ?? null,
-        data: activeData,
-      }
-      : null,
-    over: o
-      ? {
-        id: o.id,
-        role: overData?.role ?? null,
-        containerId: overData?.containerId ?? null,
-        panelId: overData?.panelId ?? null,
-        data: overData,
-      }
-      : null,
-  };
 }
 
 function itemsEqual(a = [], b = []) {
@@ -116,7 +78,9 @@ function findPanelById(panelId, panels = []) {
 }
 
 function findPanelByContainerId(containerId, panels = []) {
-  return (panels || []).find((p) => (p.containers || []).includes(containerId)) || null;
+  return (
+    (panels || []).find((p) => (p.containers || []).includes(containerId)) || null
+  );
 }
 
 function findContainerByInstanceId(instanceId, list = []) {
@@ -181,13 +145,6 @@ export function useDndReorderCoordinator({
   // instance soft-sort draft ref (kept out of reducer on purpose)
   const containersDraftRef = useRef(null);
 
-  const lastOverRef = useRef({
-    activeId: null,
-    overId: null,
-    overRole: null,
-    overContainerId: null,
-  });
-
   // ✅ de-dupe spam for panel container moves
   const lastContainerMoveRef = useRef({
     fromPanelId: null,
@@ -201,6 +158,9 @@ export function useDndReorderCoordinator({
 
   // ✅ NEW: keep latest panel objects here so dragEnd doesn’t read stale state.panels
   const touchedPanelsMapRef = useRef(new Map()); // panelId -> latest panel object
+
+  // ✅ hover intent threshold ref (MUST be at top-level, not inside callbacks)
+  const hoverIntentRef = useRef({ key: null, t0: 0 });
 
   // ✅ KEEP this (you asked)
   const getWorkingContainers = useCallback(() => {
@@ -237,20 +197,12 @@ export function useDndReorderCoordinator({
 
   const handleDragStart = useCallback(
     (event) => {
-      dispatch(setDebugEventAction(pickEvent(event, "start")));
       dispatch(setActiveIdAction(event.active.id));
 
       const rect = event.active.rect?.current?.initial;
       if (rect) dispatch(setActiveSizeAction({ width: rect.width, height: rect.height }));
 
       containersDraftRef.current = deepCloneContainers(state.containers);
-
-      lastOverRef.current = {
-        activeId: event.active.id,
-        overId: null,
-        overRole: null,
-        overContainerId: null,
-      };
 
       lastContainerMoveRef.current = {
         fromPanelId: null,
@@ -262,19 +214,22 @@ export function useDndReorderCoordinator({
       touchedPanelsRef.current = new Set();
       touchedPanelsMapRef.current = new Map();
 
+      hoverIntentRef.current = { key: null, t0: 0 };
+
       scheduleSoftTick();
     },
     [dispatch, state.containers, scheduleSoftTick]
   );
 
   const handleDragCancel = useCallback(() => {
-    dispatch(setDebugEventAction({ type: "cancel", ts: Date.now() }));
     dispatch(setActiveIdAction(null));
     dispatch(setActiveSizeAction(null));
 
     containersDraftRef.current = null;
     touchedPanelsRef.current = new Set();
     touchedPanelsMapRef.current = new Map();
+
+    hoverIntentRef.current = { key: null, t0: 0 };
 
     scheduleSoftTick();
   }, [dispatch, scheduleSoftTick]);
@@ -283,26 +238,6 @@ export function useDndReorderCoordinator({
     (event) => {
       const { active, over } = event;
       if (!over) return;
-
-      const nextOverRole = over.data?.current?.role ?? null;
-      const nextOverContainerId = over.data?.current?.containerId ?? null;
-
-      const last = lastOverRef.current;
-      const sameOver =
-        last.activeId === active.id &&
-        last.overId === over.id &&
-        last.overRole === nextOverRole &&
-        last.overContainerId === nextOverContainerId;
-
-      if (!sameOver) {
-        lastOverRef.current = {
-          activeId: active.id,
-          overId: over.id,
-          overRole: nextOverRole,
-          overContainerId: nextOverContainerId,
-        };
-        dispatch(setDebugEventAction(pickEvent(event, "over")));
-      }
 
       const activeRole = active.data?.current?.role ?? null;
       if (activeRole !== "container" && activeRole !== "instance") return;
@@ -330,33 +265,28 @@ export function useDndReorderCoordinator({
         if (!fromContainer || !toContainer) return;
 
         const overRole = over.data?.current?.role ?? null;
-        const isOverInstance = overRole === "instance";
-        const overInstanceId = isOverInstance ? over.id : null;
+        const overInstanceId = overRole === "instance" ? over.id : null;
 
         const fromId = fromContainer.id;
         const toId = toContainer.id;
-        // Prevent reordering if we're hovering a container header
 
-        if (
-          activeRole === "instance" &&
-          overRole === "container"
-        ) {
-          return;
-        }
+        // ✅ Prevent reordering if we're hovering a container header
+        if (overRole === "container") return;
+
         const fromIndex = (fromContainer.items || []).indexOf(instanceId);
         if (fromIndex === -1) return;
 
-        // ✅ compute toIndex (supports container:top / container:list / container:bottom)
-        let toIndex;
 
-        // 1) hard zones
+        // ======================================================
+        // ✅ compute toIndex (supports container:top / container:list / container:bottom)
+        // ======================================================
+        let toIndex = null;
+
         if (overRole === "container:top") {
           toIndex = 0;
-        } else if (overRole === "container:bottom" || overRole === "container:list") {
+        } else if (overRole === "container:bottom") {
           toIndex = (toContainer.items || []).length;
-        }
-        // 2) hovering an instance => before/after that instance
-        else if (overInstanceId) {
+        } else if (overInstanceId) {
           const idx = (toContainer.items || []).indexOf(overInstanceId);
           toIndex = idx >= 0 ? idx : (toContainer.items || []).length;
 
@@ -368,22 +298,24 @@ export function useDndReorderCoordinator({
               : false;
 
           toIndex = toIndex + (isBelow ? 1 : 0);
-        }
-        // 3) fallback
-        else {
-          toIndex = (toContainer.items || []).length;
+        } else {
+          // container:list empty-space => null (handled below)
+          toIndex = null;
         }
 
         // avoid no-op churn
         if (overInstanceId === instanceId) return;
 
-        // ✅ same container reorder
-        // ✅ same container reorder
+        // ======================================================
+        // ✅ SAME-CONTAINER reorder rules
+        // - container:bottom => move to end
+        // - container:list empty space => do NOTHING
+        // - hovering instance => before/after logic (arrayMove)
+        // ======================================================
         if (fromId === toId) {
           const items = fromContainer.items || [];
           const lastIndex = Math.max(0, items.length - 1);
 
-          // ✅ explicit zone drops (top/list/bottom)
           if (overRole === "container:top") {
             if (fromIndex === 0) return;
             const nextItems = arrayMove(items, fromIndex, 0);
@@ -394,7 +326,8 @@ export function useDndReorderCoordinator({
             return;
           }
 
-          if (overRole === "container:bottom" || overRole === "container:list") {
+          // ✅ ONLY bottom moves-to-end (NOT list)
+          if (overRole === "container:bottom") {
             if (fromIndex === lastIndex) return;
             const nextItems = arrayMove(items, fromIndex, lastIndex);
             containersDraftRef.current = draft.map((c) =>
@@ -404,9 +337,13 @@ export function useDndReorderCoordinator({
             return;
           }
 
+          // ✅ list empty-space should NOT “snap to end”
+          if (overRole === "container:list" && !overInstanceId) {
+            return;
+          }
+
           // ✅ hovering an instance (before/after)
           if (overInstanceId) {
-            // clamp in case toIndex becomes items.length
             const target = Math.max(0, Math.min(lastIndex, toIndex));
             if (target === fromIndex) return;
 
@@ -420,7 +357,15 @@ export function useDndReorderCoordinator({
 
           return;
         }
-        // cross-container move
+
+        // ======================================================
+        // ✅ CROSS-CONTAINER move rules
+        // - if container:list empty-space => insert at end
+        // ======================================================
+        if (toIndex == null) {
+          toIndex = (toContainer.items || []).length;
+        }
+
         const moved = moveChildAcrossParents({
           childId: instanceId,
           fromParent: fromContainer,
@@ -495,7 +440,7 @@ export function useDndReorderCoordinator({
           dispatch(updatePanelAction(updated));
 
           touchedPanelsRef.current.add(fromPanel.id);
-          touchedPanelsMapRef.current.set(fromPanel.id, updated); // ✅ NEW
+          touchedPanelsMapRef.current.set(fromPanel.id, updated);
 
           scheduleSoftTick();
           return;
@@ -517,8 +462,8 @@ export function useDndReorderCoordinator({
         touchedPanelsRef.current.add(moved.nextFromParent.id);
         touchedPanelsRef.current.add(moved.nextToParent.id);
 
-        touchedPanelsMapRef.current.set(moved.nextFromParent.id, moved.nextFromParent); // ✅ NEW
-        touchedPanelsMapRef.current.set(moved.nextToParent.id, moved.nextToParent);     // ✅ NEW
+        touchedPanelsMapRef.current.set(moved.nextFromParent.id, moved.nextFromParent);
+        touchedPanelsMapRef.current.set(moved.nextToParent.id, moved.nextToParent);
 
         scheduleSoftTick();
         return;
@@ -529,13 +474,15 @@ export function useDndReorderCoordinator({
 
   const handleDragEnd = useCallback(
     (event) => {
-      dispatch(setDebugEventAction(pickEvent(event, "end")));
 
       const { active, over } = event;
       const activeRole = active?.data?.current?.role ?? null;
 
       dispatch(setActiveIdAction(null));
       dispatch(setActiveSizeAction(null));
+
+      hoverIntentRef.current.key = null;
+      hoverIntentRef.current.t0 = 0;
 
       // ======================================================
       // CONTAINER DROP END: persist touched panels (from ref, not stale state.panels)
@@ -545,12 +492,12 @@ export function useDndReorderCoordinator({
 
         const touched = Array.from(touchedPanelsRef.current || []);
         for (const panelId of touched) {
-          const panel = touchedPanelsMapRef.current.get(panelId); // ✅ NEW
+          const panel = touchedPanelsMapRef.current.get(panelId);
           if (panel) socket?.emit("update_panel", { panel, gridId: panel.gridId });
         }
 
         touchedPanelsRef.current = new Set();
-        touchedPanelsMapRef.current = new Map(); // ✅ NEW
+        touchedPanelsMapRef.current = new Map();
         return;
       }
 
@@ -596,6 +543,12 @@ export function useDndReorderCoordinator({
       containersDraftRef,
       getWorkingContainers,
     }),
-    [handleDragStart, handleDragOver, handleDragEnd, handleDragCancel, getWorkingContainers]
+    [
+      handleDragStart,
+      handleDragOver,
+      handleDragEnd,
+      handleDragCancel,
+      getWorkingContainers,
+    ]
   );
 }

@@ -57,7 +57,6 @@ export default function FormInput({ schema, value, onChange }) {
   if (type === "button") {
     return (
       <div className={s.className}>
-        {s.label && <Label className="mb-2 block">{s.label}</Label>}
         <Button
           type="button"
           variant={s.buttonVariant ?? "default"}
@@ -65,10 +64,10 @@ export default function FormInput({ schema, value, onChange }) {
           disabled={s.disabled}
           onClick={() => s.onAction?.({ value })}
         >
-          {s.buttonText ?? "Action"}
+          {s.label ?? "Action"}
         </Button>
         {s.description && (
-          <p className="mt-2 text-xs text-muted-foreground">{s.description}</p>
+          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
         )}
       </div>
     );
@@ -88,7 +87,7 @@ export default function FormInput({ schema, value, onChange }) {
   // TEXT
   if (type === "text-input") {
     return (
-      <div className={`space-y-1.5 ${s.className ?? ""}`}>
+      <div className={`${s.className ?? ""} text-xs`}>
         {s.label && <Label>{s.label}</Label>}
         <Input
           type="text"
@@ -98,7 +97,7 @@ export default function FormInput({ schema, value, onChange }) {
           onChange={(e) => update(s.key, e.target.value)}
         />
         {s.description && (
-          <p className="text-xs text-muted-foreground">{s.description}</p>
+          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
         )}
       </div>
     );
@@ -107,7 +106,7 @@ export default function FormInput({ schema, value, onChange }) {
   // NUMBER
   if (type === "number-input") {
     return (
-      <div className={`space-y-1.5 ${s.className ?? ""}`}>
+      <div className={`${s.className ?? ""}`}>
         {s.label && <Label>{s.label}</Label>}
         <Input
           type="number"
@@ -120,7 +119,7 @@ export default function FormInput({ schema, value, onChange }) {
           onChange={(e) => update(s.key, safeNum(e.target.value, current ?? 0))}
         />
         {s.description && (
-          <p className="text-xs text-muted-foreground">{s.description}</p>
+          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
         )}
       </div>
     );
@@ -130,7 +129,7 @@ export default function FormInput({ schema, value, onChange }) {
   if (type === "select") {
     const opts = s.options ?? [];
     return (
-      <div className={`space-y-1.5 ${s.className ?? ""}`}>
+      <div className={`${s.className ?? ""}`}>
         {s.label && <Label>{s.label}</Label>}
         <Select
           value={current ?? ""}
@@ -149,7 +148,7 @@ export default function FormInput({ schema, value, onChange }) {
           </SelectContent>
         </Select>
         {s.description && (
-          <p className="text-xs text-muted-foreground">{s.description}</p>
+          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
         )}
       </div>
     );

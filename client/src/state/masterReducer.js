@@ -319,7 +319,7 @@ export function masterReducer(state, action) {
         }
 
         // ======================================================
-        // DND / UI DEBUG
+        // DND
         // ======================================================
         case ActionTypes.SET_ACTIVE_ID:
             return { ...state, activeId: action.payload?.activeId };
@@ -327,8 +327,6 @@ export function masterReducer(state, action) {
         case ActionTypes.SET_ACTIVE_SIZE:
             return { ...state, activeSize: action.payload?.activeSize };
 
-        case ActionTypes.SET_DEBUG_EVENT:
-            return { ...state, debugEvent: action.payload?.debugEvent };
 
         case ActionTypes.SOFT_TICK:
             return { ...state, softTick: (state.softTick || 0) + 1 };

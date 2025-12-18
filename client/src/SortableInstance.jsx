@@ -1,11 +1,9 @@
 import React, { useContext } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-import { GridActionsContext } from "./GridActionsContext";
 import Instance from "./Instance";
 
-function SortableInstanceInner({ instance, containerId }) {
+function SortableInstanceInner({ instance, containerId, panelId }) {
   
   const {
     setNodeRef,
@@ -16,7 +14,11 @@ function SortableInstanceInner({ instance, containerId }) {
     isDragging,
   } = useSortable({
     id: instance.id,
-    data: { role: "instance", containerId, label: instance.label },
+    data: { role: "instance", containerId, label: instance.label, panelId },
+    transition: {
+      duration: 120,
+      easing: "cubic-bezier(0.25, 1, 0.5, 1)",
+    },
   });
 
   const style = {
@@ -27,22 +29,22 @@ function SortableInstanceInner({ instance, containerId }) {
 
   
 
-  return (
-    <div className="no-select" ref={setNodeRef}
-      style={{
-        ...style,
-        touchAction: "none",
-        boxSizing: "border-box",
-      }}>
-      <Instance
-        id={instance.id}
-        label={instance.label}
-        overlay={false}
-        dragAttributes={attributes}
-        dragListeners={listeners}
-      />
-    </div>
-  );
+return (
+  <div
+    ref={setNodeRef}
+    className={`no-select instance-wrap ${isDragging ? "is-dragging" : ""}`}
+    style={{ ...style, touchAction: "none", boxSizing: "border-box" }}
+  >
+    <Instance
+      id={instance.id}
+      label={instance.label}
+      overlay={false}
+      dragAttributes={attributes}
+      dragListeners={listeners}
+    />
+  </div>
+);
+
 }
 
 export default React.memo(SortableInstanceInner, (prev, next) => {

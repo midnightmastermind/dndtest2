@@ -30,7 +30,7 @@ body {
   background: #101318;
   color: #f5f5f5;
 }
-
+/*
 button {
   background: rgb(22, 27, 34);
   color: white;
@@ -41,8 +41,21 @@ button {
   cursor: pointer;
   z-index: 100;
   touch-action: manipulation;
+  
+}
+  .toolbar label {
+  font-size: 11px;
+  font-family: monospace;
+  margin-block-end: 1px;
+  color: white;
 }
 
+.toolbar button {
+  color: white;
+  border: 1px solid #3a4452;
+  border-radius: 6px;
+}
+*/
 .drag-handle {
   z-index: 100;
 }
@@ -102,28 +115,6 @@ button {
 }
 
 /* --- Draggable instance --- */
-.dnd-instance {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: #2b333d;
-  border: 1px solid #3a4452;
-  font-size: 12px;
-  box-sizing: border-box;
-  cursor: grab;
-
-  width: fit-content;
-  max-width: 100%;
-  align-self: flex-start;
-  width: 100%;
-
-}
-
-.dnd-instance--dragging {
-  opacity: 0.6;
-}
 
 /* Make overlay not stretch */
 
@@ -136,24 +127,7 @@ button {
   gap: 10px;
   align-content: start;
   grid-auto-flow: row;
-}
-
-/* each sortable container tile */
-.container-shell {
-  min-width: 0;
-  min-height: 126px;
-  /* visual spacing */
-  box-sizing: border-box;
-}
-
-
-
-/* outer sortable container shell */
-.container-shell {
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #151a20;
-
+  padding-top: 3px;
 }
 
 /* top/bottom sentinel drop zones */
@@ -173,7 +147,6 @@ button {
   padding: 5px 0px 5px 5px;
   border-bottom: 1px solid #222;
   cursor: grab;
-  height: 24px;
 }
 
 .container-list {
@@ -185,16 +158,27 @@ button {
 .container-list.over {
   background: rgba(80, 140, 255, 0.12);
 }
-
 .dnd-instance {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 12px;
   border-radius: 6px;
-  background: #2b333d;
+  background: #4372ac;
   border: 1px solid #3a4452;
-  margin-bottom: 8px;
+  font-size: 12px;
+  box-sizing: border-box;
+  cursor: grab;
+
+  width: fit-content;
+  max-width: 100%;
+  align-self: flex-start;
+  width: 100%;
 }
 
+.dnd-instance--dragging {
+  opacity: 0.6;
+}
 
 /* panels scroll naturally */
 .panel-scroll {
@@ -220,18 +204,7 @@ button {
   max-height: 30vh
 }
 
-.toolbar label {
-  font-size: 11px;
-  font-family: monospace;
-  margin-block-end: 1px;
-  color: white;
-}
 
-.toolbar button {
-  color: white;
-  border: 1px solid #3a4452;
-  border-radius: 6px;
-}
 
 .panel-scroll * {
   max-width: 100%;
@@ -289,12 +262,6 @@ button {
   /* Optional: ensures the cursor doesn't turn into a text selection caret */
 }
 
-
-
-.container-shell {
-  overflow: hidden !important;
-}
-
 :root {
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
     Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -312,20 +279,236 @@ button {
 }
 
 .dark {
-  --background: 222 47% 11%;
-  --foreground: 210 40% 98%;
-  --border: 0 0% 20%;
-  --popover: 220 22% 7%;
+  /* =========================
+     BACKGROUND (app canvas)
+     ========================= */
+  --background-0: 222 30% 6%;
+  --background-1: 222 30% 7%;
+  --background-2: 222 30% 9%;
+
+  /* =========================
+     SURFACE (panels / cards)
+     ========================= */
+  --surface-0: 215 18% 10%;
+  --surface-1: 215 18% 11%;
+  --surface-2: 215 18% 13%;
+
+  /* =========================
+     POPOVER / FLOATING UI
+     ========================= */
+  --popover-0: 220 22% 6%;
+  --popover-1: 220 22% 7%;
+  --popover-2: 220 22% 9%;
+
   --popover-foreground: 210 40% 98%;
-  --background2: 215 21% 10%;
-  --input: 215 21% 11%;
-  --overlay: 0 20% 1%;
+
+  /* =========================
+     INPUTS
+     ========================= */
+  --input-0: 215 21% 10%;
+  --input-1: 215 21% 11%;
+  --input-2: 215 21% 13%;
+
+  /* =========================
+     OVERLAY (drag / modal)
+     ========================= */
+  --overlay-0: 0 20% 1%;
+  --overlay-1: 0 20% 2%;
+  --overlay-2: 0 20% 4%;
+
+  /* =========================
+     BORDERS
+     ========================= */
+  --border-0: 216 17% 27%;
+  --border-1: 0 0% 20%;
+  --border-2: 0 0% 26%;
+
+  /* =========================
+     TEXT
+     ========================= */
+  --foreground-0: 210 40% 94%;
+  --foreground-1: 210 40% 98%;
+  --foreground-2: 216 15% 65%;
+
+
+    /* ✅ Tailwind token aliases (these are what your tailwind.config reads) */
+  --background: var(--background-1);
+  --foreground: var(--foreground-1);
+
+  --border: var(--border-1);
+
+  --popover: var(--popover-1);
+  --popover-foreground: var(--popover-foreground);
+
+  --primary: 210 40% 98%;
+  --primary-foreground: 222 30% 8%;
+
+  --accent: var(--surface-2);
+  --accent-foreground: var(--foreground-1);
+
+  /* ✅ keep these names because you already use them in Tailwind */
+  --background2: var(--surface-0); /* you wanted “background2 but named different” — use surface */
+  --input2: var(--input-1);        /* keep your input vibe */
+  --overlay: var(--overlay-0);     /* keep overlay the same */
 }
 
 html.dark {
   color-scheme: dark;
 }
 
-.grid-wrapper {
-  height: 86vh !important;
+.grid-frame {
+  background: hsl(var(--surface-0)); /* was background2 */
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border-1));
+  padding: 6px;
+  overflow: hidden;
+
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6);
 }
+
+/* --- Panel floating card polish --- */
+.panel-card {
+  box-shadow:
+    0 10px 22px rgba(0,0,0,0.55),
+    0 1px 0 rgba(255,255,255,0.04) inset;
+}
+
+/* --- Panel header subtle sheen (doesn't override bg) --- */
+.panel-header {
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset;
+}
+
+/* --- Container recessed well polish --- */
+.container-shell {
+  min-width: 0;
+  min-height: 126px;
+  box-sizing: border-box;
+
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border-1));
+  background: hsl(var(--surface-1));
+  overflow: hidden;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    inset 0 -10px 24px rgba(0,0,0,0.35);
+}
+
+
+/* Optional: make the grid "canvas" feel inset */
+
+.grid-wrapper {
+  border-radius: 12px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.03),
+    inset 0 18px 40px rgba(0,0,0,0.35);
+}
+
+.panel-card {
+  box-shadow:
+    0 10px 24px rgba(0,0,0,0.60),
+    0 1px 0 rgba(255,255,255,0.04) inset;
+}
+
+/* ---------- Pocket dock inside the container ---------- */
+.instance-pocket {
+  padding: 6px;
+  border-radius: 10px;
+
+  background: hsl(var(--input2));              /* your “dock” */
+  border: 1px solid hsl(var(--border));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    inset 0 14px 28px rgba(0,0,0,0.35);
+}
+
+/* ---------- Instance wrapper spacing ---------- */
+.instance-wrap {
+  width: 100%;
+}
+
+/* When the sortable item is being dragged, your original hides (opacity 0).
+   Keep pointer events off so it doesn’t block hits. */
+.instance-wrap.is-dragging {
+  pointer-events: none;
+}
+
+/* ---------- Make the Instance card look “raised in a well” ---------- */
+/* This assumes Instance renders a root element we can target.
+   If Instance has a className prop, even better—use that instead. */
+.instance-wrap > * {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  background:rgba(12, 53, 70, 0.35);         /* “card” surface */
+
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.35),               /* raised */
+    0 1px 0 rgba(255,255,255,0.04) inset;      /* sheen */
+}
+
+/* Slight “pressed into dock” feel on hover */
+.instance-wrap:hover > * {
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.45),
+    0 1px 0 rgba(255,255,255,0.05) inset;
+}
+
+.instance-overlay > * {
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-0));
+  box-shadow:
+    0 18px 40px rgba(0,0,0,0.70),
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+  transform: translateZ(0); /* crisp */
+}
+/* ---------- Overlay: general “floating above everything” feel ---------- */
+.panel-overlay,
+.container-overlay,
+.instance-overlay {
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.72));
+  transform: translateZ(0); /* crisp text */
+}
+
+/* ---------- Panel overlay (PanelClone root) ---------- */
+.panel-overlay > * {
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-0));
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 1px 0 rgba(255,255,255,0.06) inset;
+}
+
+/* ---------- Container overlay (ContainerClone root) ---------- */
+.container-overlay > * {
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-1));
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 10px 22px rgba(0,0,0,0.55);
+}
+
+/* (You already have this, but here’s the consistent version) */
+.instance-overlay > * {
+  border-radius: 10px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--surface-0));
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset;
+}
+.grid-cell{
+  min-width:0; min-height:0;
+  border:1px solid #3F444A;
+  border-radius: 8px;
+  transition: background 80ms;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.grid-cell.is-dark{ background:#22272B; }
+.grid-cell.is-light{ background:#2C333A; }
+.grid-cell.is-highlight{ background:rgba(50,150,255,0.45); }

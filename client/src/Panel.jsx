@@ -1,9 +1,7 @@
 // Panel.jsx
 import React, { useRef, useMemo, useState, useCallback } from "react";
-import { useDraggable, useDndContext, useDroppable } from "@dnd-kit/core";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
-import { token } from "@atlaskit/tokens";
-import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 import { ActionTypes } from "./state/actions";
 import { emit } from "./socket";
 import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } from "@dnd-kit/sortable";
@@ -48,7 +46,8 @@ function Panel({
   addContainerToPanel,
   addInstanceToContainer,
   instancesById,
-  containersSource,
+  containersById,
+  sizesRef
 }) {
   const resizeTransformRef = useRef({ w: null, h: null });
 
@@ -64,12 +63,12 @@ function Panel({
 
 
   const [layout, setLayout] = useState({
-  name: "",
-  flow: "row",
-  columns: 3,
-  rows: 0,
-  gap: 12,
-});
+    name: "",
+    flow: "row",
+    columns: 3,
+    rows: 0,
+    gap: 12,
+  });
 
 
   // ✅ panel dropzone on shell (NOT scroll)
@@ -104,7 +103,7 @@ function Panel({
     return false;
   })();
 
-  const collapsed = activeId === panel.id;
+  const collapsed = false;
   const highlightPanel =
     isContainerDrag && (isOverPanelDrop || isOverThisPanel) && !collapsed;
 
@@ -120,27 +119,11 @@ function Panel({
     [panel.id, panel.col, panel.row, panel.width, panel.height]
   );
 
-  const { setNodeRef: setPanelDragRef, attributes, listeners } = useDraggable({
+  const { setNodeRef: setPanelDragRef, attributes, listeners, setActivatorNodeRef  } = useDraggable({
     id: panel.id,
     data,
     disabled: fullscreen,
   });
-
-  const { active, measureDroppableContainers } = useDndContext();
-
-  const scrollTimeoutRef = useRef(null);
-
-  const onPanelScroll = useCallback(() => {
-    const role = active?.data?.current?.role;
-    if (role !== "instance") return;
-
-    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-
-    scrollTimeoutRef.current = setTimeout(() => {
-      measureDroppableContainers();
-      scrollTimeoutRef.current = null;
-    }, 80);
-  }, [active, measureDroppableContainers]);
 
   // ✅ merge droppable + draggable refs on shell
   const setPanelShellRef = useCallback(
@@ -153,9 +136,16 @@ function Panel({
 
   const panelContainerIds = panel?.containers || [];
 
-  const panelContainers = panelContainerIds
-    .map((id) => (containersSource || []).find((c) => c.id === id))
-    .filter(Boolean);
+  const panelContainers = useMemo(() => {
+    const ids = panel?.containers || [];
+    const out = [];
+    for (const id of ids) {
+      const c = containersById?.[id];
+      if (c) out.push(c);
+    }
+    return out;
+  }, [panel?.containers, containersById]);
+
 
   const updatePanelFinal = (updated) => {
     dispatch({ type: ActionTypes.UPDATE_PANEL, payload: updated });
@@ -178,10 +168,8 @@ function Panel({
     setFullscreen((f) => !f);
   };
 
-  const getTrackInfo = () => {
-    const data = gridRef.current?.dataset.sizes;
-    return data ? JSON.parse(data) : null;
-  };
+const getTrackInfo = () => sizesRef?.current ?? null;
+
 
   const colFromPx = (px) => {
     const track = getTrackInfo();
@@ -284,14 +272,14 @@ function Panel({
     : highlightPanel
       ? "2px solid rgba(50,150,255,0.9)"
       : "none";
-  console.log(layout);
   return (
     <div
+      className="panel-card bg-background rounded-lg border border-border shadow-xl"
+
       data-panel-id={panel.id}
       ref={setPanelShellRef}
       style={{
         gridArea,
-        background: token("elevation.surface", "rgba(17,17,17,0.95)"),
         borderRadius: 8,
         outline: outlineStyle,
         outlineOffset: "-2px",
@@ -307,7 +295,7 @@ function Panel({
     >
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         {/* HEADER */}
-        <div className="bg-[hsl(var(--overlay)/0.52)]"
+        <div className="panel-header bg-overlay/60 border-b border-border flex items-center h-6"
           style={{
             borderTopLeftRadius: 8,
             borderTopRightRadius: 8,
@@ -322,41 +310,39 @@ function Panel({
           }}
         >
           <div
-  className="drag-handle cursor-grab active:cursor-grabbing pl-[8px]"
-  {...panelHandleProps}
->
-  <GripVertical className="h-4 w-4 text-white" />
-</div>
-       
+            className="drag-handle cursor-grab active:cursor-grabbing touch-none pl-2"
+            {...panelHandleProps}
+          >
+            <GripVertical className="h-4 w-4 text-white" />
+          </div>
 
 
-          {!isOverThisPanel && (
-            <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
-              <ButtonPopover label={<Settings className="h-4 w-4" />}>
-  <LayoutForm value={layout} onChange={setLayout} />
-</ButtonPopover>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => addContainerToPanel(panel.id)}
-              >
-              
-  <PlusSquare className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleFullscreen}
-              >
-              
-  {fullscreen ? (
-    <Minimize className="h-4 w-4" />
-  ) : (
-    <Maximize className="h-4 w-4" />
-  )}
-              </Button>
-            </div>
-          )}
+
+
+          <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
+            <ButtonPopover label={<Settings className="h-4 w-4" />}>
+              <LayoutForm value={layout} onChange={setLayout} />
+            </ButtonPopover>
+            <Button
+              size="sm"
+              onClick={() => addContainerToPanel(panel.id)}
+            >
+
+              <PlusSquare className="h-4 w-4 pt-[2px]" /> Container
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleFullscreen}
+            >
+
+              {fullscreen ? (
+                <Minimize className="h-4 w-4" />
+              ) : (
+                <Maximize className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* BODY */}
@@ -366,7 +352,7 @@ function Panel({
             flex: 1,
             minHeight: 0,
             overflow: "hidden",
-          
+
             display: "flex",
             flexDirection: "column",
           }}
@@ -471,9 +457,6 @@ export default React.memo(Panel, (prev, next) => {
   if (prev.rows !== next.rows) return false;
   // Instances map changes must re-render so lists show new items immediately
   if (prev.instancesById !== next.instancesById) return false;
-
-  // (optional, but usually needed too)
-  if (prev.containersSource !== next.containersSource) return false;
 
   return true;
 });

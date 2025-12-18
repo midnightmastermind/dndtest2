@@ -1,5 +1,12 @@
 // GridInner.jsx
-import React, { useContext, useMemo, useRef, useState, useEffect } from "react";
+import React, {
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import {
   useDroppable,
   DndContext,
@@ -19,8 +26,6 @@ import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
 import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
 
-const DEBUG_GRID_HIGHLIGHT = false;
-
 /* -------------------------------------------
    ✅ Overlay clone for CONTAINER drags
 ------------------------------------------- */
@@ -28,7 +33,10 @@ function ContainerClone({ container }) {
   if (!container) return null;
 
   return (
-    <div className="container-shell" style={{ pointerEvents: "none", opacity: 0.95 }}>
+    <div
+      className="container-shell"
+      style={{ pointerEvents: "none", opacity: 0.95 }}
+    >
       <div className="container-header">
         <div style={{ paddingLeft: 6 }}>
           <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
@@ -39,7 +47,14 @@ function ContainerClone({ container }) {
       </div>
 
       <div className="container-list" style={{ minHeight: 60 }}>
-        <div style={{ fontSize: 12, opacity: 0.6, fontStyle: "italic", padding: 8 }}>
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.6,
+            fontStyle: "italic",
+            padding: 8,
+          }}
+        >
           Dragging…
         </div>
       </div>
@@ -50,7 +65,13 @@ function ContainerClone({ container }) {
 /* ------------------------------------------------------------
    DROPPABLE GRID CELL
 ------------------------------------------------------------ */
-function CellDroppable({ r, c, dark, highlight, disabled  }) {
+const CellDroppable = React.memo(function CellDroppable({
+  r,
+  c,
+  dark,
+  highlight,
+  disabled,
+}) {
   const { setNodeRef } = useDroppable({
     id: `cell-${r}-${c}`,
     disabled,
@@ -59,28 +80,38 @@ function CellDroppable({ r, c, dark, highlight, disabled  }) {
 
   return (
     <div
-      data-id={`cell-${r}-${c}`}
       ref={setNodeRef}
-      style={{
-        gridRow: r + 1,
-        gridColumn: c + 1,
-        minWidth: 0,
-        minHeight: 0,
-        background: highlight
-          ? "rgba(50,150,255,0.45)"
-          : dark
-            ? "#22272B"
-            : "#2C333A",
-        border: "1px solid #3F444A",
-        transition: "background 80ms",
-      }}
+      data-id={`cell-${r}-${c}`}
+      className={[
+        "grid-cell",
+        dark ? "is-dark" : "is-light",
+        highlight ? "is-highlight" : "",
+      ].join(" ")}
+      style={{ gridRow: r + 1, gridColumn: c + 1 }}
     />
   );
-}
+});
+
+/* ------------------------------------------------------------
+   NON-DROPPABLE GRID CELL (cheap background for non-panel drags)
+------------------------------------------------------------ */
+const CellStatic = React.memo(function CellStatic({ r, c, dark, highlight }) {
+  return (
+    <div
+      data-id={`cell-${r}-${c}`}
+      className={[
+        "grid-cell",
+        "is-static",
+        dark ? "is-dark" : "is-light",
+        highlight ? "is-highlight" : "",
+      ].join(" ")}
+      style={{ gridRow: r + 1, gridColumn: c + 1 }}
+    />
+  );
+});
 
 /* ------------------------------------------------------------
    Grid canvas (DUMB)
-   - gets ONE object "panelProps"
 ------------------------------------------------------------ */
 function GridCanvas({
   gridRef,
@@ -99,8 +130,46 @@ function GridCanvas({
   getRowPosition,
   highlightCellId,
   panelProps,
-  activeRole
+  activeRole,
 }) {
+  // ✅ build cells once per dependency set (prevents rebuild on unrelated renders)
+  const cells = useMemo(() => {
+    const out = [];
+    const isPanelDrag = activeRole === "panel";
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const dark = (r + c) % 2 === 0;
+        const cellId = `cell-${r}-${c}`;
+        const highlight = cellId === highlightCellId;
+
+        // ✅ only mount droppable cells during panel drag
+        out.push(
+          isPanelDrag ? (
+            <CellDroppable
+              key={cellId}
+              r={r}
+              c={c}
+              dark={dark}
+              highlight={highlight}
+              disabled={false}
+            />
+          ) : (
+            <CellStatic
+              key={cellId}
+              r={r}
+              c={c}
+              dark={dark}
+              highlight={highlight}
+            />
+          )
+        );
+      }
+    }
+
+    return out;
+  }, [rows, cols, highlightCellId, activeRole]);
+
   return (
     <div
       className="grid-wrapper"
@@ -118,27 +187,12 @@ function GridCanvas({
         overscrollBehaviorY: "none",
       }}
     >
-      {[...Array(rows)].map((_, r) =>
-        [...Array(cols)].map((_, c) => {
-          const dark = (r + c) % 2 === 0;
-          const cellId = `cell-${r}-${c}`;
-          return (
-            <CellDroppable
-              key={`${r}-${c}`}
-              r={r}
-              c={c}
-              dark={dark}
-              highlight={cellId === highlightCellId}
-                disabled={activeRole !== "panel"}  // <- huge win
-
-            />
-          );
-        })
-      )}
+      {cells}
 
       {/* Vertical resizers */}
       {[...Array(cols - 1)].map((_, i) => (
         <div
+          className="bg-background border border-border rounded-sm shadow-md hover:shadow-lg"
           key={`col-resize-${i}`}
           onMouseDown={(e) => startColResize(e, i)}
           onTouchStart={(e) => startColResize(e, i)}
@@ -159,6 +213,7 @@ function GridCanvas({
       {/* Row resizers */}
       {[...Array(rows - 1)].map((_, i) => (
         <div
+          className="bg-background border border-border rounded-sm shadow-md hover:shadow-lg"
           key={`row-resize-${i}`}
           onMouseDown={(e) => startRowResize(e, i)}
           onTouchStart={(e) => startRowResize(e, i)}
@@ -207,44 +262,44 @@ function GridInner({ components }) {
     updatePanel,
     updateGrid,
     socket,
-
     addContainerToPanel,
     addInstanceToContainer,
     instancesById,
   } = useContext(GridActionsContext);
 
   const sensors = useSensors(
-  useSensor(TouchSensor, {
-    activationConstraint: { delay: 150, tolerance: 5 },
-    eventOptions: { passive: false },
-  }),
-  useSensor(PointerSensor, {
-    activationConstraint: { distance: 6 },
-  })
-);
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 150, tolerance: 5 },
+      eventOptions: { passive: false },
+    }),
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    })
+  );
 
   const grid = state.grid;
   const gridId = grid?._id;
   const rows = grid?.rows ?? 1;
   const cols = grid?.cols ?? 1;
 
-  const visiblePanels = state.panels.filter((p) => p.gridId === gridId);
+  const visiblePanels = useMemo(() => {
+    const arr = state.panels || [];
+    return arr.filter((p) => p.gridId === gridId);
+  }, [state.panels, gridId]);
+
   const gridRef = useRef(null);
 
   const [activeId, setActiveId] = useState(null);
   const [activeRole, setActiveRole] = useState(null);
   const [panelDragging, setPanelDragging] = useState(false);
-
-  // ✅ latest “over” data for hover highlight + panel/container logic
   const [overData, setOverData] = useState(null);
 
   const isContainerDrag = activeRole === "container";
   const isInstanceDrag = activeRole === "instance";
 
-  // ✅ highlight target cell for panel drags
   const [panelOverCellId, setPanelOverCellId] = useState(null);
 
-  // ✅ REAL cursor/touch pointer (single truth)
+  // ✅ REAL cursor/touch pointer
   const livePointerRef = useRef({ x: null, y: null });
 
   useEffect(() => {
@@ -275,12 +330,18 @@ function GridInner({ components }) {
   const ensureSizes = (arr, count) => {
     if (!Array.isArray(arr) || arr.length === 0) return Array(count).fill(1);
     if (arr.length === count) return arr;
-    if (arr.length < count) return [...arr, ...Array(count - arr.length).fill(1)];
+    if (arr.length < count)
+      return [...arr, ...Array(count - arr.length).fill(1)];
     return arr.slice(0, count);
   };
 
   const [colSizes, setColSizes] = useState(() => ensureSizes(grid?.colSizes, cols));
   const [rowSizes, setRowSizes] = useState(() => ensureSizes(grid?.rowSizes, rows));
+  const sizesRef = useRef({ colSizes: [], rowSizes: [] });
+
+  useEffect(() => {
+    sizesRef.current = { colSizes, rowSizes };
+  }, [colSizes, rowSizes]);
 
   function sameArray(a = [], b = []) {
     if (a === b) return true;
@@ -292,7 +353,7 @@ function GridInner({ components }) {
   useEffect(() => {
     const next = ensureSizes(grid?.colSizes, cols);
     setColSizes((prev) => (sameArray(prev, next) ? prev : next));
-  }, [cols, grid?._id]);
+  }, [cols, grid?._id]); // keep behavior the same
 
   useEffect(() => {
     const next = ensureSizes(grid?.rowSizes, rows);
@@ -366,44 +427,193 @@ function GridInner({ components }) {
   }
 
   const getStartClientX = (event) =>
-    event?.activatorEvent?.clientX ?? event?.activatorEvent?.touches?.[0]?.clientX;
+    event?.activatorEvent?.clientX ??
+    event?.activatorEvent?.touches?.[0]?.clientX;
 
   const getStartClientY = (event) =>
-    event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
+    event?.activatorEvent?.clientY ??
+    event?.activatorEvent?.touches?.[0]?.clientY;
 
+  // ------------------------------------------------------------
+  // ✅ containersById (use this everywhere; Panel.jsx expects it)
+  // ------------------------------------------------------------
+  const containersById = useMemo(() => {
+    const m = Object.create(null);
+    const src = containersRender ?? state?.containers ?? [];
+    for (const c of src) m[c.id] = c;
+    return m;
+  }, [containersRender, state?.containers]);
+
+  // ------------------------------------------------------------
+  // ✅ Hovered panel detection (topmost panel under pointer)
+  // ------------------------------------------------------------
+function getHoveredPanelId(pt) {
+  if (!pt) return null;
+
+  const stack = document.elementsFromPoint(pt.x, pt.y);
+
+  for (const el of stack) {
+    // ignore drag overlays if you have them
+    if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay")) continue;
+
+    const panelEl = el.closest?.("[data-panel-id]");
+    if (panelEl) {
+      return panelEl.getAttribute("data-panel-id") || panelEl.dataset.panelId || null;
+    }
+  }
+  return null;
+}
+
+  // ------------------------------------------------------------
+  // ✅ collision detection memo (scoped for instance/container drags)
+  // ------------------------------------------------------------
   const collisionDetection = useMemo(() => {
-    return (args) => {
-      const role = args.active?.data?.current?.role;
+  return (args) => {
+    const role = args.active?.data?.current?.role;
 
-      if (role === "panel") {
-        return panelOverCellId ? [{ id: panelOverCellId }] : [];
-      }
+    // panel drag: keep your grid-cell behavior
+    if (role === "panel") {
+      return panelOverCellId ? [{ id: panelOverCellId }] : [];
+    }
 
-      const hits = pointerWithin(args);
-      const fallback = hits.length ? hits : closestCenter(args);
-      if (role === "instance") {
-        const hits = pointerWithin(args);
+    const hits = pointerWithin(args);
+    const fallback = hits.length ? hits : closestCenter(args);
 
-        const listTargets = hits.filter((c) => {
-          const r = c?.data?.droppableContainer?.data?.current?.role;
-          return r === "instance" || String(r).startsWith("container:");
-        });
+    const shouldScope = role === "instance" || role === "container";
+    if (!shouldScope) return fallback;
 
-        if (listTargets.length) return listTargets;
+    // ✅ Choose hoveredPanelId from hits (priority order)
+    const getMeta = (c) => c?.data?.droppableContainer?.data?.current ?? null;
 
-        // ✅ fallback to panel drop ONLY if not over any list target
-        const panelTargets = hits.filter((c) => {
-          const r = c?.data?.droppableContainer?.data?.current?.role;
-          return r === "panel:drop";
-        });
+    const pickPanelIdFromHits = () => {
+      // Prefer container edges / instance zones (most specific)
+      const preferred = hits.find((c) => {
+        const d = getMeta(c);
+        const r = d?.role;
+        return (
+          d?.panelId &&
+          (r === "instance" ||
+            (typeof r === "string" && r.startsWith("container:")))
+        );
+      });
+      if (preferred) return getMeta(preferred)?.panelId;
 
-        return panelTargets; // might be []
-      }
+      // Else prefer panel:drop
+      const panelDrop = hits.find((c) => getMeta(c)?.role === "panel:drop" && getMeta(c)?.panelId);
+      if (panelDrop) return getMeta(panelDrop)?.panelId;
 
-
-      return fallback;
+      // Else just first hit with a panelId
+      const any = hits.find((c) => !!getMeta(c)?.panelId);
+      return any ? getMeta(any)?.panelId : null;
     };
-  }, [panelOverCellId]);
+
+const pt = args.pointerCoordinates;
+
+// ✅ Use DOM stack first (topmost panel wins)
+let hoveredPanelId = getHoveredPanelId(pt);
+
+// ✅ Fallback to hits only if DOM stack couldn't find a panel
+if (!hoveredPanelId) hoveredPanelId = pickPanelIdFromHits();
+
+if (!hoveredPanelId) return fallback;
+
+    const scopedHits = hits.filter((c) => getMeta(c)?.panelId === hoveredPanelId);
+if (role === "instance") {
+  const listTargets = scopedHits.filter((c) => {
+    const r = getMeta(c)?.role;
+    return r === "instance" || String(r).startsWith("container:");
+  });
+
+  const panelTargets = scopedHits.filter(
+    (c) => getMeta(c)?.role === "panel:drop"
+  );
+
+  console.groupCollapsed("[CD instance]");
+  console.log("pointer:", args.pointerCoordinates);
+  console.log("hoveredPanelId:", hoveredPanelId);
+
+  console.log(
+    "HITS:",
+    hits.map((h) => {
+      const d = getMeta(h);
+      return {
+        id: h.id,
+        role: d?.role,
+        panelId: d?.panelId,
+        containerId: d?.containerId,
+      };
+    })
+  );
+
+  console.log(
+    "SCOPED:",
+    scopedHits.map((h) => {
+      const d = getMeta(h);
+      return {
+        id: h.id,
+        role: d?.role,
+        panelId: d?.panelId,
+        containerId: d?.containerId,
+      };
+    })
+  );
+
+  console.log(
+    "LIST TARGETS:",
+    listTargets.map((h) => {
+      const d = getMeta(h);
+      return {
+        id: h.id,
+        role: d?.role,
+        panelId: d?.panelId,
+        containerId: d?.containerId,
+      };
+    })
+  );
+
+  console.log(
+    "PANEL TARGETS:",
+    panelTargets.map((h) => {
+      const d = getMeta(h);
+      return {
+        id: h.id,
+        role: d?.role,
+        panelId: d?.panelId,
+      };
+    })
+  );
+
+  const chosen =
+    listTargets[0] ??
+    panelTargets[0] ??
+    null;
+
+  console.log(
+    "CHOSEN:",
+    chosen
+      ? {
+          id: chosen.id,
+          role: getMeta(chosen)?.role,
+          panelId: getMeta(chosen)?.panelId,
+          containerId: getMeta(chosen)?.containerId,
+        }
+      : null
+  );
+console.log("DOM hoveredPanelId:", getHoveredPanelId(args.pointerCoordinates));
+console.log("HITS-picked panelId:", hoveredPanelId);
+
+  console.groupEnd();
+
+  if (listTargets.length) return listTargets;
+  return panelTargets;
+}
+
+
+    // container drag
+    return scopedHits.length ? scopedHits : fallback;
+  };
+}, [panelOverCellId]);
+
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
@@ -422,7 +632,8 @@ function GridInner({ components }) {
 
       if (typeof startX === "number" && typeof startY === "number") {
         const rc = getCellFromPointer(startX, startY);
-        setPanelOverCellId(rc ? `cell-${rc.row}-${rc.col}` : null);
+        const next = rc ? `cell-${rc.row}-${rc.col}` : null;
+        setPanelOverCellId(next);
       } else {
         setPanelOverCellId(null);
       }
@@ -432,36 +643,51 @@ function GridInner({ components }) {
     handleDragStartProp?.(event);
   };
 
+  // ✅ RAF throttle + de-dupe panelOverCellId updates
+  const rafRef = useRef(null);
+  const lastCellRef = useRef(null);
+
   const handleDragMove = () => {
     if (!panelDragging) return;
+    if (rafRef.current) return;
 
-    const live = livePointerRef.current;
-    if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
 
-    const rc = getCellFromPointer(live.x, live.y);
-    setPanelOverCellId(rc ? `cell-${rc.row}-${rc.col}` : null);
+      const live = livePointerRef.current;
+      if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
+
+      const rc = getCellFromPointer(live.x, live.y);
+      const next = rc ? `cell-${rc.row}-${rc.col}` : null;
+
+      if (next !== lastCellRef.current) {
+        lastCellRef.current = next;
+        setPanelOverCellId(next);
+      }
+    });
   };
 
-  // ✅ de-dupe + sanitize overData to prevent header boundary thrash
+  // ✅ de-dupe overData updates to avoid thrash
   const lastOverKeyRef = useRef("");
 
   const handleDragOver = (event) => {
-    const activeRole = event.active?.data?.current?.role;
+    const activeRoleNow = event.active?.data?.current?.role;
     const d = event.over?.data?.current ?? null;
 
-    // ✅ During INSTANCE drags, ignore “junk” overs (panel shell/header/container root)
     let safe = d;
-    if (activeRole === "instance") {
+    if (activeRoleNow === "instance") {
       const r = safe?.role;
       const ok =
         r === "instance" ||
         (typeof r === "string" && r.startsWith("container:")) ||
-        r === "panel:drop"; // ✅ allow as “hover signal”
+        r === "panel:drop";
       safe = ok ? safe : null;
     }
 
     const key = safe
-      ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}|${event.over?.id ?? ""}`
+      ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}|${
+          event.over?.id ?? ""
+        }`
       : "";
 
     if (key !== lastOverKeyRef.current) {
@@ -469,9 +695,7 @@ function GridInner({ components }) {
       setOverData(safe);
     }
 
-    // panel moves are handled locally (pointer-based cell placement)
-    if (activeRole === "panel") return;
-
+    if (activeRoleNow === "panel") return;
     handleDragOverProp?.(event);
   };
 
@@ -485,7 +709,6 @@ function GridInner({ components }) {
 
     if (!data) return;
 
-    // non-panel: let coordinator handle it
     if (data.role !== "panel") {
       handleDragEndProp?.(event);
       return;
@@ -495,6 +718,7 @@ function GridInner({ components }) {
     if (!panel) {
       requestAnimationFrame(() => setPanelDragging(false));
       setPanelOverCellId(null);
+      lastCellRef.current = null;
       return;
     }
 
@@ -507,6 +731,7 @@ function GridInner({ components }) {
     if (!rc) {
       requestAnimationFrame(() => setPanelDragging(false));
       setPanelOverCellId(null);
+      lastCellRef.current = null;
       return;
     }
 
@@ -521,6 +746,7 @@ function GridInner({ components }) {
 
     livePointerRef.current = { x: null, y: null };
     setPanelOverCellId(null);
+    lastCellRef.current = null;
 
     requestAnimationFrame(() => setPanelDragging(false));
   };
@@ -533,6 +759,7 @@ function GridInner({ components }) {
     livePointerRef.current = { x: null, y: null };
 
     setPanelOverCellId(null);
+    lastCellRef.current = null;
     requestAnimationFrame(() => setPanelDragging(false));
 
     const role = event.active?.data?.current?.role;
@@ -677,10 +904,11 @@ function GridInner({ components }) {
     window.addEventListener("touchend", stop);
   };
 
+  // ✅ use containersById for overlay lookup (prevents stale lookup)
   const activeContainer = useMemo(() => {
     if (activeRole !== "container" || !activeId) return null;
-    return (state?.containers || []).find((c) => c.id === activeId) || null;
-  }, [activeRole, activeId, state?.containers]);
+    return containersById?.[activeId] || null;
+  }, [activeRole, activeId, containersById]);
 
   const Instance = components["Instance"];
 
@@ -689,7 +917,6 @@ function GridInner({ components }) {
     return instancesById?.[activeId] || null;
   }, [activeRole, activeId, instancesById]);
 
-  // ✅ single “panel props” object
   const panelProps = useMemo(
     () => ({
       overData,
@@ -698,7 +925,8 @@ function GridInner({ components }) {
       addContainerToPanel,
       addInstanceToContainer,
       instancesById,
-      containersSource: containersRender ?? state?.containers ?? [],
+      containersById,
+      sizesRef,
     }),
     [
       overData,
@@ -707,8 +935,8 @@ function GridInner({ components }) {
       addContainerToPanel,
       addInstanceToContainer,
       instancesById,
-      containersRender,
-      state?.containers,
+      containersById,
+      sizesRef,
     ]
   );
 
@@ -716,7 +944,14 @@ function GridInner({ components }) {
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
-      measuring={{ droppable: { strategy: MeasuringStrategy.WhileDragging } }}
+      measuring={{
+        droppable: {
+          strategy:
+            isContainerDrag || isInstanceDrag
+              ? MeasuringStrategy.Always // only when it matters
+              : MeasuringStrategy.BeforeDragging, // perf win
+        },
+      }}
       autoScroll={{
         enabled: true,
         threshold: { x: 0.15, y: 0.15 },
@@ -729,12 +964,13 @@ function GridInner({ components }) {
       onDragCancel={handleDragCancel}
     >
       <div
+        className="bg-background2 rounded-xl border border-border shadow-inner ring-1 ring-black/30"
         style={{
           position: "absolute",
           inset: 0,
           background: "#1D2125",
           overflow: "hidden",
-          top: "45px",
+          top: "20px",
         }}
       >
         <GridCanvas
@@ -760,17 +996,26 @@ function GridInner({ components }) {
 
       <DragOverlay dropAnimation={null} zIndex={100000} adjustScale={false}>
         {activeId && activeRole === "panel" && getPanel(activeId) ? (
-          <PanelClone panel={getPanel(activeId)} />
+          <div className="panel-overlay" style={{ pointerEvents: "none" }}>
+            <PanelClone panel={getPanel(activeId)} />
+          </div>
         ) : null}
 
         {activeId && activeRole === "container" ? (
-          <div style={{ width: state?.activeSize?.width, height: state?.activeSize?.height }}>
+          <div
+            className="container-overlay"
+            style={{
+              pointerEvents: "none",
+              width: state?.activeSize?.width,
+              height: state?.activeSize?.height,
+            }}
+          >
             <ContainerClone container={activeContainer} />
           </div>
         ) : null}
 
         {activeId && activeRole === "instance" && activeInstance ? (
-          <div style={{ pointerEvents: "none" }}>
+          <div className="instance-overlay" style={{ pointerEvents: "none" }}>
             <Instance id={activeInstance.id} label={activeInstance.label} overlay />
           </div>
         ) : null}

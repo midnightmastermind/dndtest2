@@ -18,7 +18,7 @@ export default function ButtonPopover({
   children,
   label = "Layout",          // can now be string OR <Settings />
   buttonVariant = "ghost",
-  align = "end",
+  align = "start",
   side = "bottom",
   className = "",
 }) {
@@ -30,7 +30,7 @@ export default function ButtonPopover({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent align={align} side={side} className={`w-80 p-3 ${className}`}>
+      <PopoverContent align={align} side={side} className={`w-80 ${className}`}>
         {children}
       </PopoverContent>
     </Popover>
