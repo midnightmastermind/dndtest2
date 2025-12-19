@@ -82,43 +82,6 @@ export default function LayoutForm({ value, onChange }) {
           });
         }}
       />
-<FormInput
-  schema={{
-    type: "select",
-    key: "alignItems",
-    label: "Align items",
-    options: [
-      { value: "start", label: "Start" },
-      { value: "center", label: "Center" },
-      { value: "end", label: "End" },
-      { value: "stretch", label: "Stretch" },
-      ...(isFlex ? [{ value: "baseline", label: "Baseline" }] : []),
-    ],
-    description: "align-items (cross-axis alignment of items).",
-  }}
-  value={value}
-  onChange={onChange}
-/>
-<FormInput
-  schema={{
-    type: "select",
-    key: "alignContent",
-    label: "Align content",
-    options: [
-      { value: "start", label: "Start" },
-      { value: "center", label: "Center" },
-      { value: "end", label: "End" },
-      { value: "between", label: "Space between" },
-      { value: "around", label: "Space around" },
-      { value: "evenly", label: "Space evenly" },
-      { value: "stretch", label: "Stretch" },
-    ],
-    description:
-      "align-content (only matters when there’s extra space: flex-wrap or grid with spare space).",
-  }}
-  value={value}
-  onChange={onChange}
-/>
 
       {/* Flow (both grid+flex use it) */}
       <FormInput
@@ -271,7 +234,44 @@ export default function LayoutForm({ value, onChange }) {
           onChange={onChange}
         />
       </div>
-
+      
+<FormInput
+  schema={{
+    type: "select",
+    key: "alignItems",
+    label: "Align items",
+    options: [
+      { value: "start", label: "Start" },
+      { value: "center", label: "Center" },
+      { value: "end", label: "End" },
+      { value: "stretch", label: "Stretch" },
+      ...(isFlex ? [{ value: "baseline", label: "Baseline" }] : []),
+    ],
+    description: "align-items (cross-axis alignment of items).",
+  }}
+  value={value}
+  onChange={onChange}
+/>
+<FormInput
+  schema={{
+    type: "select",
+    key: "alignContent",
+    label: "Align content",
+    options: [
+      { value: "start", label: "Start" },
+      { value: "center", label: "Center" },
+      { value: "end", label: "End" },
+      { value: "between", label: "Space between" },
+      { value: "around", label: "Space around" },
+      { value: "evenly", label: "Space evenly" },
+      { value: "stretch", label: "Stretch" },
+    ],
+    description:
+      "align-content (only matters when there’s extra space: flex-wrap or grid with spare space).",
+  }}
+  value={value}
+  onChange={onChange}
+/>
       {/* JUSTIFY */}
       <FormInput
         schema={{
@@ -391,21 +391,6 @@ export default function LayoutForm({ value, onChange }) {
           onChange={onChange}
         />
       </div>
-
-      {/* Align */}
-      <FormInput
-        schema={{
-          type: "select",
-          key: "align",
-          label: "Align",
-          options: [
-            { value: "start", label: "Start" },
-            { value: "stretch", label: "Stretch" },
-          ],
-        }}
-        value={value}
-        onChange={onChange}
-      />
 
       {/* Dense */}
       <FormInput

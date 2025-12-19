@@ -30,7 +30,7 @@ export default function ButtonPopover({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent align={align} side={side} className={`w-96 ${className}`}>
+      <PopoverContent align={align} side={side} className={` ${className}`}>
         {children}
       </PopoverContent>
     </Popover>
