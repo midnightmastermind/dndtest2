@@ -8,6 +8,8 @@ import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } f
 import { Button } from "./components/ui/button"
 import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
+import { ListWrapper } from "@/components/ui/list-wrapper"
+
 import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 // ----------------------------
 // memo helpers
@@ -61,14 +63,50 @@ function Panel({
 
   const isChildDrag = isContainerDrag || isInstanceDrag;
 
+  function gapPxToPreset(px) {
+    const n = Number(px) || 0;
+    if (n <= 0) return "none";
+    if (n <= 8) return "sm";
+    if (n <= 16) return "md";
+    return "lg";
+  }
 
   const [layout, setLayout] = useState({
     name: "",
+    display: "grid",
     flow: "row",
-    columns: 3,
+    wrap: "wrap",
+    columns: 0,
     rows: 0,
-    gap: 12,
+
+    gapPx: 12,
+    gapPreset: "md",
+
+    align: "start",
+    dense: false,
+    insetX: "panel",
+    padding: "none",
+    variant: "default",
+
+    scrollType: "auto",
+    scrollHideDelay: 600,
+
+    // ✅ NEW
+    scrollX: "none",   // "none" | "auto" | "always"
+    scrollY: "auto",   // "none" | "auto" | "always"
+    widthMode: "auto",
+    fixedWidth: 340,
+    minWidthPx: 0,
+    maxWidthPx: 0,
+    justify: "start",
+    heightMode: "auto",
+    fixedHeight: 0,
+    minHeightPx: 0,
+    maxHeightPx: 0,
+
   });
+
+
 
 
   // ✅ panel dropzone on shell (NOT scroll)
@@ -119,7 +157,7 @@ function Panel({
     [panel.id, panel.col, panel.row, panel.width, panel.height]
   );
 
-  const { setNodeRef: setPanelDragRef, attributes, listeners, setActivatorNodeRef  } = useDraggable({
+  const { setNodeRef: setPanelDragRef, attributes, listeners, setActivatorNodeRef } = useDraggable({
     id: panel.id,
     data,
     disabled: fullscreen,
@@ -168,7 +206,7 @@ function Panel({
     setFullscreen((f) => !f);
   };
 
-const getTrackInfo = () => sizesRef?.current ?? null;
+  const getTrackInfo = () => sizesRef?.current ?? null;
 
 
   const colFromPx = (px) => {
@@ -272,6 +310,9 @@ const getTrackInfo = () => sizesRef?.current ?? null;
     : highlightPanel
       ? "2px solid rgba(50,150,255,0.9)"
       : "none";
+
+  const gapPresetFinal = gapPxToPreset(layout.gapPx);
+
   return (
     <div
       className="panel-card bg-background rounded-lg border border-border shadow-xl"
@@ -359,68 +400,67 @@ const getTrackInfo = () => sizesRef?.current ?? null;
         >
           <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
-          <div
-            data-panelid={panel.id}
-            className="panel-scroll"
-            style={{
-              width: "100%",
-              height: "100%",
-              overflowY: "auto",
-              overflowX: "hidden",
-              WebkitOverflowScrolling: "touch",
-              overscrollBehavior: "contain",
-              touchAction: "pan-y",
-              minHeight: 120,
-              position: "relative",
-            }}
-          >
-            <div style={{ boxSizing: "border-box" }}>
-              <div className="containers-col">
-                <SortableContext
-                  items={panelContainerIds}
-                  strategy={rectSortingStrategy}
-                  disabled={isInstanceDrag}
-                >
-                  {panelContainers.map((c) => (
-                    <SortableContainer
-                      key={c.id}
-                      container={c}
-                      panelId={panel.id}
-                      instancesById={instancesById}
-                      addInstanceToContainer={addInstanceToContainer}
-                      isDraggingContainer={isContainerDrag}
-                      isInstanceDrag={isInstanceDrag}
-                      overData={overData}
-                    />
-                  ))}
-                </SortableContext>
 
-                {panelContainers.length === 0 && !isContainerDrag && (
-                  <div style={{ marginTop: 12, opacity: 0.7, fontSize: 13 }}>
-                    Create a container to start.
-                  </div>
-                )}
+         <SortableContext
+  items={panelContainerIds}
+  strategy={rectSortingStrategy}
+  disabled={isInstanceDrag}
+>
+<ListWrapper
+  className="h-full w-full"
+  display={layout.display}
+  flow={layout.flow}
+  wrap={layout.display === "flex" ? (layout.wrap ?? "wrap") : undefined}
 
-                {panel.containers.length === 0 && isContainerDrag && (
-                  <div
-                    style={{
-                      height: 80,
-                      margin: 12,
-                      borderRadius: 10,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "rgba(50,150,255,0.9)",
-                      fontSize: 13,
-                      pointerEvents: "none",
-                    }}
-                  >
-                    Drop container here
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+  columns={layout.display === "grid" ? layout.columns : 0}
+
+  align={layout.align}
+  dense={layout.dense}
+  gap={gapPresetFinal}
+  insetX={layout.insetX}
+  padding={layout.padding}
+  variant={layout.variant}
+  scrollType={layout.scrollType}
+  scrollHideDelay={layout.scrollHideDelay}
+  scrollX={layout.scrollX}
+  scrollY={layout.scrollY}
+
+  // ✅ single width/height system used for grid tracks + flex children
+  widthMode={layout.widthMode}
+  fixedWidth={layout.fixedWidth}
+  minWidthPx={layout.minWidthPx}
+  maxWidthPx={layout.maxWidthPx}
+
+  heightMode={layout.heightMode}
+  fixedHeight={layout.fixedHeight}
+  minHeightPx={layout.minHeightPx}
+  maxHeightPx={layout.maxHeightPx}
+
+  justify={layout.justify}
+>
+
+    {panelContainers.map((c) => (
+      <SortableContainer
+        key={c.id}
+        container={c}
+        panelId={panel.id}
+        instancesById={instancesById}
+        addInstanceToContainer={addInstanceToContainer}
+        isDraggingContainer={isContainerDrag}
+        isInstanceDrag={isInstanceDrag}
+        overData={overData}
+      />
+    ))}
+
+    {panelContainers.length === 0 && !isContainerDrag && (
+      <div className="mt-3 opacity-70 text-[13px]">
+        Create a container to start.
+      </div>
+    )}
+  </ListWrapper>
+</SortableContext>
+
+
 
           <div style={{ height: 20, zIndex: 1 }} />
         </div>

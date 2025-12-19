@@ -180,7 +180,7 @@ function SortableContainerInner({
               left: -13,
               right: -13,
               top: -45,
-              height: 95,
+              height: 50,
               pointerEvents: "none",
               borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
@@ -197,20 +197,21 @@ function SortableContainerInner({
               position: "absolute",
               left: -13,
               right: -13,
-              top: 50,
-              bottom: 48,
+              top: 5,
+              bottom: 5,
               pointerEvents: "none",
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              zIndex: 1,
+              zIndex: 2,
               borderRadius: 10,
               maxWidth: "unset",
+              minHeight: "50px"
             }}
           />
 
           {/* VISIBLE LIST */}
           <div
             className="container-list instance-pocket"
-            style={{ position: "relative", zIndex: 2, overflow: "visible" }}
+            style={{ position: "relative", overflow: "visible" }}
           >
             <SortableContext
               id={`container-sortable:${container.id}`}
@@ -237,8 +238,8 @@ function SortableContainerInner({
               position: "absolute",
               left: -15,
               right: -15,
-              bottom: -7,
-              height: 55,
+              bottom: -10,
+              height: 15,
               zIndex: 2,
               pointerEvents: "none",
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",

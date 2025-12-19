@@ -48,7 +48,13 @@ function ContainerClone({ container }) {
 /* ------------------------------------------------------------
    DROPPABLE GRID CELL
 ------------------------------------------------------------ */
-const CellDroppable = React.memo(function CellDroppable({ r, c, dark, highlight, disabled }) {
+const CellDroppable = React.memo(function CellDroppable({
+  r,
+  c,
+  dark,
+  highlight,
+  disabled,
+}) {
   const { setNodeRef } = useDroppable({
     id: `cell-${r}-${c}`,
     disabled,
@@ -119,7 +125,14 @@ function GridCanvas({
 
         out.push(
           isPanelDrag ? (
-            <CellDroppable key={cellId} r={r} c={c} dark={dark} highlight={highlight} disabled={false} />
+            <CellDroppable
+              key={cellId}
+              r={r}
+              c={c}
+              dark={dark}
+              highlight={highlight}
+              disabled={false}
+            />
           ) : (
             <CellStatic key={cellId} r={r} c={c} dark={dark} highlight={highlight} />
           )
@@ -148,6 +161,7 @@ function GridCanvas({
     >
       {cells}
 
+      {/* Vertical resizers */}
       {[...Array(cols - 1)].map((_, i) => (
         <div
           className="bg-background border border-border rounded-sm shadow-md hover:shadow-lg"
@@ -168,6 +182,7 @@ function GridCanvas({
         />
       ))}
 
+      {/* Row resizers */}
       {[...Array(rows - 1)].map((_, i) => (
         <div
           className="bg-background border border-border rounded-sm shadow-md hover:shadow-lg"
@@ -188,6 +203,7 @@ function GridCanvas({
         />
       ))}
 
+      {/* Panels */}
       {visiblePanels.map((p) => (
         <Panel
           key={p.id}
@@ -223,20 +239,22 @@ function GridInner({ components }) {
     instancesById,
     pointerRef, // ✅ shared ref from App.jsx
   } = useContext(GridActionsContext);
-// ✅ DEBUG: flip on/off quickly
-const DEBUG_DND = true;
 
-// ✅ throttle noisy logs to ~10/sec
-const debugRafRef = useRef({ t: 0 });
-function dlog(label, payload) {
-  if (!DEBUG_DND) return;
-  const now = performance.now();
-  if (now - debugRafRef.current.t < 100) return;
-  debugRafRef.current.t = now;
-  console.groupCollapsed(label);
-  console.log(payload);
-  console.groupEnd();
-}
+  // ✅ DEBUG: flip on/off quickly
+  const DEBUG_DND = true;
+
+  // ✅ throttle noisy logs to ~10/sec
+  const debugRafRef = useRef({ t: 0 });
+  function dlog(label, payload) {
+    if (!DEBUG_DND) return;
+    const now = performance.now();
+    if (now - debugRafRef.current.t < 100) return;
+    debugRafRef.current.t = now;
+    console.groupCollapsed(label);
+    console.log(payload);
+    console.groupEnd();
+  }
+
   const sensors = useSensors(
     useSensor(TouchSensor, {
       activationConstraint: { delay: 150, tolerance: 5 },
@@ -403,128 +421,175 @@ function dlog(label, payload) {
   }, [containersRender, state?.containers]);
 
   function getHoveredPanelId(pt) {
-  if (!pt) return null;
+    if (!pt) return null;
 
-  const stack = document.elementsFromPoint(pt.x, pt.y);
+    const stack = document.elementsFromPoint(pt.x, pt.y);
 
-  if (DEBUG_DND) {
-    const top10 = stack.slice(0, 10).map((el) => ({
-      tag: el.tagName,
-      cls: el.className,
-      panel: el.closest?.("[data-panel-id]")?.getAttribute("data-panel-id") || null,
-      droppable: el.getAttribute?.("data-droppable-id") || null,
-    }));
-    dlog("[DOM stack]", { pt, top10 });
+    if (DEBUG_DND) {
+      const top10 = stack.slice(0, 10).map((el) => ({
+        tag: el.tagName,
+        cls: el.className,
+        panel: el.closest?.("[data-panel-id]")?.getAttribute("data-panel-id") || null,
+        // ✅ dnd-kit attributes
+        droppable: el.getAttribute?.("data-dndkit-droppable-id") || null,
+        draggable: el.getAttribute?.("data-dndkit-draggable-id") || null,
+      }));
+      dlog("[DOM stack]", { pt, top10 });
+    }
+
+    for (const el of stack) {
+      if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay")) continue;
+      const panelEl = el.closest?.("[data-panel-id]");
+      if (panelEl) {
+        return panelEl.getAttribute("data-panel-id") || panelEl.dataset.panelId || null;
+      }
+    }
+    return null;
+  }
+  function logReturn(label, arr, role, args) {
+    if (!DEBUG_DND) return;
+    console.log(label, {
+      role,
+      pointer: args.pointerCoordinates,
+      returning: Array.isArray(arr) ? arr.map(x => x.id) : arr,
+    });
+    return arr;
   }
 
-  for (const el of stack) {
-    if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay")) continue;
-    const panelEl = el.closest?.("[data-panel-id]");
-    if (panelEl) return panelEl.getAttribute("data-panel-id") || panelEl.dataset.panelId || null;
-  }
-  return null;
-}
+  // ✅ collision detection
   const collisionDetection = useMemo(() => {
     return (args) => {
       const role = args.active?.data?.current?.role;
-const pt = args.pointerCoordinates;
+      const pt = args.pointerCoordinates;
 
-if (DEBUG_DND) {
-  dlog("[CD entry]", {
-    role,
-    pointer: pt,
-    activeId: args.active?.id,
-    overCell: panelOverCellId ?? null,
-    droppablesCount: args.droppableContainers?.length,
-  });
-}
+      if (DEBUG_DND) {
+        dlog("[CD entry]", {
+          role,
+          pointer: pt,
+          activeId: args.active?.id,
+          overCell: panelOverCellId ?? null,
+          droppablesCount: args.droppableContainers?.length,
+        });
+      }
+
+      // panel drag: keep your grid-cell behavior
       if (role === "panel") {
-        return panelOverCellId ? [{ id: panelOverCellId }] : [];
+        return logReturn("[CD return panel]", panelOverCellId ? [{ id: panelOverCellId }] : [], role, args);
       }
 
       const hits = pointerWithin(args);
       const fallback = hits.length ? hits : closestCenter(args);
 
+      if (DEBUG_DND) {
+        console.log("[CD core]", {
+          role,
+          pointer: args.pointerCoordinates,
+          hitsLen: hits.length,
+          fallbackLen: fallback?.length ?? 0,
+          // IMPORTANT: how many droppables actually have rects?
+          droppables: (args.droppableContainers || []).length,
+          rectReady: (args.droppableContainers || []).filter(dc => dc?.rect?.current).length,
+        });
+      }
+
+
       const shouldScope = role === "instance" || role === "container";
-      if (!shouldScope) return fallback;
+      if (!shouldScope) return logReturn("[CD return no hoveredPanelId]", fallback, role, args);
 
       const getMeta = (c) => c?.data?.droppableContainer?.data?.current ?? null;
 
-if (DEBUG_DND) {
-  dlog("[CD hits]", {
-    role,
-    pointer: pt,
-    hits: hits.map((h) => {
-      const d = getMeta(h);
-      return {
-        id: h.id,
-        role: d?.role,
-        panelId: d?.panelId,
-        containerId: d?.containerId,
-      };
-    }),
-  });
-}
+      if (DEBUG_DND) {
+        dlog("[CD hits]", {
+          role,
+          pointer: pt,
+          hits: hits.map((h) => {
+            const d = getMeta(h);
+            return {
+              id: h.id,
+              role: d?.role,
+              panelId: d?.panelId,
+              containerId: d?.containerId,
+            };
+          }),
+        });
+      }
 
       const pickPanelIdFromHits = () => {
         const preferred = hits.find((c) => {
           const d = getMeta(c);
           const r = d?.role;
-          return d?.panelId && (r === "instance" || (typeof r === "string" && r.startsWith("container:")));
+          return (
+            d?.panelId &&
+            (r === "instance" || (typeof r === "string" && r.startsWith("container:")))
+          );
         });
         if (preferred) return getMeta(preferred)?.panelId;
 
-        const panelDrop = hits.find((c) => getMeta(c)?.role === "panel:drop" && getMeta(c)?.panelId);
+        const panelDrop = hits.find(
+          (c) => getMeta(c)?.role === "panel:drop" && getMeta(c)?.panelId
+        );
         if (panelDrop) return getMeta(panelDrop)?.panelId;
 
         const any = hits.find((c) => !!getMeta(c)?.panelId);
         return any ? getMeta(any)?.panelId : null;
       };
 
-      const pt = args.pointerCoordinates;
+      // ✅ Use DOM stack first (topmost panel wins), fallback to hits
+      const domPanel = pt ? getHoveredPanelId(pt) : null;
+      let hoveredPanelId = domPanel || pickPanelIdFromHits();
 
-      let hoveredPanelId = getHoveredPanelId(pt);
-if (!hoveredPanelId) hoveredPanelId = pickPanelIdFromHits();
+      if (DEBUG_DND) {
+        dlog("[CD hoveredPanelId]", {
+          role,
+          pointer: pt,
+          domPanel,
+          hitsPanel: hoveredPanelId,
+        });
+      }
 
-if (DEBUG_DND) {
-  dlog("[CD hoveredPanelId]", {
-    role,
-    pointer: pt,
-    domPanel: getHoveredPanelId(pt),
-    hitsPanel: hoveredPanelId,
-  });
-}
-      
-      
-      
-      if (!hoveredPanelId) return fallback;
+      if (!hoveredPanelId) return logReturn("[CD return fallback]", fallback, role, args);
+
 
       const scopedHits = hits.filter((c) => getMeta(c)?.panelId === hoveredPanelId);
 
+      // ✅ FIX: prioritize instance-over-instance hits FIRST (prevents container:list “winning”)
       if (role === "instance") {
-        const listTargets = scopedHits.filter((c) => {
-          const r = getMeta(c)?.role;
-          return r === "instance" || String(r).startsWith("container:");
-        });
+        const instanceHits = scopedHits.filter((c) => getMeta(c)?.role === "instance");
+        if (instanceHits.length) return logReturn("[CD return instanceHits]", instanceHits, role, args);
+
+
+        const containerZoneHits = scopedHits.filter((c) =>
+          String(getMeta(c)?.role || "").startsWith("container:")
+        );
+        if (containerZoneHits.length) return logReturn("[CD return containerZoneHits]", containerZoneHits,role, args);
 
         const panelTargets = scopedHits.filter((c) => getMeta(c)?.role === "panel:drop");
+        if (panelTargets.length) return logReturn("[CD return panelTargets]", panelTargets, role, args);
 
-        if (listTargets.length) return listTargets;
-        return panelTargets;
+          return logReturn("[CD return fallback]", fallback, role, args);
+
+
       }
-if (DEBUG_DND) {
-  dlog("[CD scopedHits]", {
-    role,
-    hoveredPanelId,
-    scoped: scopedHits.map((h) => {
-      const d = getMeta(h);
-      return { id: h.id, role: d?.role, panelId: d?.panelId, containerId: d?.containerId };
-    }),
-  });
-}
+
+      if (DEBUG_DND) {
+        dlog("[CD scopedHits]", {
+          role,
+          hoveredPanelId,
+          scoped: scopedHits.map((h) => {
+            const d = getMeta(h);
+            return {
+              id: h.id,
+              role: d?.role,
+              panelId: d?.panelId,
+              containerId: d?.containerId,
+            };
+          }),
+        });
+      }
+
       return scopedHits.length ? scopedHits : fallback;
     };
-  }, [panelOverCellId]);
+  }, [panelOverCellId]); // keep minimal deps
 
   const handleDragStart = (event) => {
     setActiveId(event.active.id);
@@ -554,6 +619,7 @@ if (DEBUG_DND) {
     handleDragStartProp?.(event);
   };
 
+  // panel drag move (RAF)
   const rafRef = useRef(null);
   const lastCellRef = useRef(null);
 
@@ -583,14 +649,30 @@ if (DEBUG_DND) {
     const activeRoleNow = event.active?.data?.current?.role;
     const d = event.over?.data?.current ?? null;
 
+    // ✅ key “why is instance reorder wrong” log:
+    if (DEBUG_DND && activeRoleNow === "instance") {
+      dlog("[OVER raw]", {
+        overId: event.over?.id ?? null,
+        overRole: d?.role ?? null,
+        overContainerId: d?.containerId ?? null,
+        overPanelId: d?.panelId ?? null,
+        pointer: pointerRef.current,
+      });
+    }
+
     let safe = d;
     if (activeRoleNow === "instance") {
       const r = safe?.role;
-      const ok = r === "instance" || (typeof r === "string" && r.startsWith("container:")) || r === "panel:drop";
+      const ok =
+        r === "instance" ||
+        (typeof r === "string" && r.startsWith("container:")) ||
+        r === "panel:drop";
       safe = ok ? safe : null;
     }
 
-    const key = safe ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}|${event.over?.id ?? ""}` : "";
+    const key = safe
+      ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}|${event.over?.id ?? ""}`
+      : "";
 
     if (key !== lastOverKeyRef.current) {
       lastOverKeyRef.current = key;
@@ -664,7 +746,7 @@ if (DEBUG_DND) {
     if (role !== "panel") handleDragCancelProp?.(event);
   };
 
-  // ---- Grid resizing (unchanged from your version) ----
+  // ---- Grid resizing (unchanged) ----
   const resizePendingRef = useRef({ rowSizes: null, colSizes: null });
 
   const finalizeResize = () => {

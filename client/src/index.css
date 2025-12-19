@@ -144,7 +144,7 @@ button {
   display: flex;
   justify-content: start;
   align-items: center;
-  padding: 5px 0px 5px 5px;
+  padding: 5px 0px 3px 5px;
   border-bottom: 1px solid #222;
   cursor: grab;
 }
@@ -386,7 +386,6 @@ html.dark {
   min-width: 0;
   min-height: 126px;
   box-sizing: border-box;
-
   border-radius: 8px;
   border: 1px solid hsl(var(--border-1));
   background: hsl(var(--surface-1));
@@ -428,6 +427,9 @@ html.dark {
 /* ---------- Instance wrapper spacing ---------- */
 .instance-wrap {
   width: 100%;
+  z-index: 3;
+  position: relative;
+  margin-bottom: 5px;
 }
 
 /* When the sortable item is being dragged, your original hides (opacity 0).
@@ -512,3 +514,18 @@ html.dark {
 .grid-cell.is-dark{ background:#22272B; }
 .grid-cell.is-light{ background:#2C333A; }
 .grid-cell.is-highlight{ background:rgba(50,150,255,0.45); }
+
+.panel-scroll {
+  width: 100%;
+  height: 100%;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+
+  min-height: 120px;
+  position: relative;
+}

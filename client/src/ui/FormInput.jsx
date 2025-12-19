@@ -2,6 +2,9 @@ import React from "react";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -13,9 +16,17 @@ import {
 /**
  * schema:
  * {
- *   type: "button" | "text-input" | "number-input" | "select",
+ *   type:
+ *     | "button"
+ *     | "text-input"
+ *     | "number-input"
+ *     | "select"
+ *     | "toggle"
+ *     | "checkbox"
+ *     | "slider",
+ *
  *   label?: React.ReactNode,
- *   key?: string, // required for inputs/select
+ *   key?: string, // required for inputs/select/toggle/checkbox/slider
  *   description?: React.ReactNode,
  *   placeholder?: string,
  *   disabled?: boolean,
@@ -26,6 +37,13 @@ import {
  *   // select options
  *   options?: Array<{ value: string; label: React.ReactNode }>,
  *
+ *   // slider options
+ *   sliderMin?: number,        // fallback to min ?? 0
+ *   sliderMax?: number,        // fallback to max ?? 100
+ *   sliderStep?: number,       // fallback to step ?? 1
+ *   showValue?: boolean,       // show numeric value to the right
+ *   valueSuffix?: string,      // e.g. "px"
+ *
  *   // button options
  *   buttonText?: React.ReactNode,
  *   buttonVariant?: string,
@@ -34,24 +52,26 @@ import {
  *
  *   className?: string,
  * }
- *
- * props:
- *  - schema: object above
- *  - value: object (all form values)
- *  - onChange: (nextValueObj) => void
  */
 export default function FormInput({ schema, value, onChange }) {
   const s = schema ?? {};
   const type = s.type;
 
   const update = (k, next) => {
-    onChange?.({ ...value, [k]: next });
+    onChange?.({ ...(value ?? {}), [k]: next });
   };
 
   const safeNum = (raw, fallback = 0) => {
     const n = Number(raw);
     return Number.isFinite(n) ? n : fallback;
   };
+
+  const renderDesc = () =>
+    s.description ? (
+      <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">
+        {s.description}
+      </p>
+    ) : null;
 
   // BUTTON
   if (type === "button") {
@@ -66,9 +86,7 @@ export default function FormInput({ schema, value, onChange }) {
         >
           {s.label ?? "Action"}
         </Button>
-        {s.description && (
-          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
-        )}
+        {renderDesc()}
       </div>
     );
   }
@@ -96,9 +114,7 @@ export default function FormInput({ schema, value, onChange }) {
           disabled={s.disabled}
           onChange={(e) => update(s.key, e.target.value)}
         />
-        {s.description && (
-          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
-        )}
+        {renderDesc()}
       </div>
     );
   }
@@ -110,7 +126,7 @@ export default function FormInput({ schema, value, onChange }) {
         {s.label && <Label>{s.label}</Label>}
         <Input
           type="number"
-          value={current ?? 0}
+          value={Number.isFinite(current) ? current : (current ?? 0)}
           min={s.min}
           max={s.max}
           step={s.step}
@@ -118,9 +134,7 @@ export default function FormInput({ schema, value, onChange }) {
           disabled={s.disabled}
           onChange={(e) => update(s.key, safeNum(e.target.value, current ?? 0))}
         />
-        {s.description && (
-          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
-        )}
+        {renderDesc()}
       </div>
     );
   }
@@ -132,11 +146,11 @@ export default function FormInput({ schema, value, onChange }) {
       <div className={`${s.className ?? ""}`}>
         {s.label && <Label>{s.label}</Label>}
         <Select
-          value={current ?? ""}
+          value={current ?? undefined}
           onValueChange={(v) => update(s.key, v)}
           disabled={s.disabled}
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-full">
             <SelectValue placeholder={s.placeholder ?? "Select…"} />
           </SelectTrigger>
           <SelectContent>
@@ -147,9 +161,87 @@ export default function FormInput({ schema, value, onChange }) {
             ))}
           </SelectContent>
         </Select>
-        {s.description && (
-          <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">{s.description}</p>
-        )}
+        {renderDesc()}
+      </div>
+    );
+  }
+
+  // TOGGLE (boolean)
+  if (type === "toggle") {
+    const checked = !!current;
+    return (
+      <div className={`${s.className ?? ""}`}>
+        <div className="flex items-center justify-between gap-3">
+          {s.label && <Label>{s.label}</Label>}
+          <Switch
+            checked={checked}
+            disabled={s.disabled}
+            onCheckedChange={(v) => update(s.key, !!v)}
+          />
+        </div>
+        {renderDesc()}
+      </div>
+    );
+  }
+
+  // CHECKBOX (boolean)
+  if (type === "checkbox") {
+    const checked = !!current;
+    return (
+      <div className={`${s.className ?? ""}`}>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={checked}
+            disabled={s.disabled}
+            onCheckedChange={(v) => update(s.key, !!v)}
+          />
+          {s.label && <Label>{s.label}</Label>}
+        </div>
+        {renderDesc()}
+      </div>
+    );
+  }
+
+  // SLIDER (number)
+  if (type === "slider") {
+    const min = safeNum(s.sliderMin ?? s.min, 0);
+    const max = safeNum(s.sliderMax ?? s.max, 100);
+    const step = safeNum(s.sliderStep ?? s.step, 1);
+    const showValue = s.showValue !== false; // default true
+    const suffix = s.valueSuffix ?? "";
+
+    const curNum =
+      Number.isFinite(Number(current)) ? Number(current) : safeNum(current, min);
+
+    const clamped = Math.min(max, Math.max(min, curNum));
+
+    return (
+      <div className={`${s.className ?? ""}`}>
+        <div className="flex items-center justify-between gap-3">
+          {s.label && <Label>{s.label}</Label>}
+          {showValue && (
+            <div className="text-[11px] text-foregroundScale-2 tabular-nums">
+              {clamped}
+              {suffix}
+            </div>
+          )}
+        </div>
+
+        <div className="pt-2">
+          <Slider
+            disabled={s.disabled}
+            min={min}
+            max={max}
+            step={step}
+            value={[clamped]}
+            onValueChange={(arr) => {
+              const next = Array.isArray(arr) ? arr[0] : arr;
+              update(s.key, safeNum(next, clamped));
+            }}
+          />
+        </div>
+
+        {renderDesc()}
       </div>
     );
   }
