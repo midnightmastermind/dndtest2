@@ -28,7 +28,7 @@ const viewportVariants = cva(
 
 const listVariants = cva("min-w-0", {
   variants: {
-    display: { grid: "grid", flex: "flex" },
+    display: { grid: "grid", flex: "flex", columns: "" }, // ✅ NEW: columns masonry uses style, not a display class
     flow: { row: "", col: "" },
     wrap: { wrap: "flex-wrap", nowrap: "flex-nowrap" },
 
@@ -68,6 +68,10 @@ const listVariants = cva("min-w-0", {
     { display: "flex", flow: "col", className: "flex-col" },
     { display: "grid", flow: "row", className: "grid-flow-row" },
     { display: "grid", flow: "col", className: "grid-flow-col" },
+    { display: "grid", dense: true, className: "grid-flow-dense" },
+
+    // ✅ NEW: columns masonry (CSS columns)
+    // NOTE: no "display" class needed; we apply column styles inline.
   ],
 
   defaultVariants: {
@@ -122,7 +126,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
     listClassName,
 
     // behavior
-    display = "grid",
+    display = "grid", // "grid" | "flex" | "columns"
     flow = "row",
     wrap, // ✅ no default here; we compute it below
     gap = "md",
@@ -133,8 +137,11 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
 
     insetX = "panel",
 
-    // grid columns (0 = auto-fill)
+    // grid/columns columns (0 = auto)
     columns = 0,
+
+    // ✅ grid rows (0 = auto / implicit rows)
+    rows = 0,
 
     // ✅ ONE width/height system (no minItemWidth anymore)
     widthMode = "auto", // "auto" | "fixed"
@@ -164,11 +171,17 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
   },
   ref
 ) {
-  const overflowX = scrollX === "none" ? "hidden" : scrollX === "always" ? "scroll" : "auto";
-  const overflowY = scrollY === "none" ? "hidden" : scrollY === "always" ? "scroll" : "auto";
+  const overflowX =
+    scrollX === "none" ? "hidden" : scrollX === "always" ? "scroll" : "auto";
+  const overflowY =
+    scrollY === "none" ? "hidden" : scrollY === "always" ? "scroll" : "auto";
 
-  // ✅ only apply wrap when flex; never leak flex-wrap classes into grid
-  const wrapFinal = display === "flex" ? (wrap ?? "wrap") : undefined;
+  const isGrid = display === "grid";
+  const isFlex = display === "flex";
+  const isColumns = display === "columns";
+
+  // ✅ only apply wrap when flex; never leak flex-wrap classes into grid/columns
+  const wrapFinal = isFlex ? wrap ?? "wrap" : undefined;
 
   // ✅ grid sizing is driven by tracks (repeat + minmax)
   const { min: trackMin, max: trackMax } = computeMinMaxWidth({
@@ -178,14 +191,25 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
     maxWidthPx,
   });
 
-  const gridTemplateColumns =
-    display === "grid"
-      ? columns && Number(columns) > 0
-        ? `repeat(${Number(columns)}, minmax(${trackMin}, ${trackMax}))`
-        : `repeat(auto-fill, minmax(${trackMin}, ${trackMax}))`
+  // GRID: template columns/rows
+  const gridTemplateColumns = isGrid
+    ? columns && Number(columns) > 0
+      ? `repeat(${Number(columns)}, minmax(${trackMin}, ${trackMax}))`
+      : `repeat(auto-fill, minmax(${trackMin}, ${trackMax}))`
+    : undefined;
+
+  const gridTemplateRows =
+    isGrid && Number(rows) > 0
+      ? `repeat(${Number(rows)}, minmax(0, 1fr))`
       : undefined;
 
-  // ✅ height is always safe to apply to wrapper (grid/flex)
+  // COLUMNS (masonry): use CSS columns
+  // - If columns > 0: force count via column-count
+  // - Else: use column-width baseline derived from trackMin
+  const columnCount = isColumns && Number(columns) > 0 ? Number(columns) : undefined;
+  const columnWidth = isColumns && (!columns || Number(columns) <= 0) ? trackMin : undefined;
+
+  // ✅ height is always safe to apply to wrapper (grid/flex/columns)
   const itemHeightStyle = computeHeightStyle({
     heightMode,
     fixedHeight,
@@ -194,28 +218,35 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
   });
 
   // ✅ flex needs explicit width constraints on children; grid does NOT
-  const flexChildWidthStyle =
-    display === "flex"
-      ? (() => {
-          const s = {};
-          if (widthMode === "fixed") {
-            const w = Number(fixedWidth) || 0;
-            if (w > 0) s.width = `${w}px`;
-            const maxW = Number(maxWidthPx) || 0;
-            if (maxW > 0) s.maxWidth = `${maxW}px`;
-          } else {
-            const minW = Number(minWidthPx) || 0;
-            const maxW = Number(maxWidthPx) || 0;
-            if (minW > 0) s.minWidth = `${minW}px`;
-            if (maxW > 0) s.maxWidth = `${maxW}px`;
-          }
-          return s;
-        })()
-      : null;
+  const flexChildWidthStyle = isFlex
+    ? (() => {
+        const s = {};
+        if (widthMode === "fixed") {
+          const w = Number(fixedWidth) || 0;
+          if (w > 0) s.width = `${w}px`;
+          const maxW = Number(maxWidthPx) || 0;
+          if (maxW > 0) s.maxWidth = `${maxW}px`;
+        } else {
+          const minW = Number(minWidthPx) || 0;
+          const maxW = Number(maxWidthPx) || 0;
+          if (minW > 0) s.minWidth = `${minW}px`;
+          if (maxW > 0) s.maxWidth = `${maxW}px`;
+        }
+        return s;
+      })()
+    : null;
 
   return (
-    <div ref={ref} className={cn(listWrapperVariants({ variant, padding }), className)} {...props}>
-      <ScrollArea.Root type={scrollType} scrollHideDelay={scrollHideDelay} className="h-full w-full">
+    <div
+      ref={ref}
+      className={cn(listWrapperVariants({ variant, padding }), className)}
+      {...props}
+    >
+      <ScrollArea.Root
+        type={scrollType}
+        scrollHideDelay={scrollHideDelay}
+        className="h-full w-full"
+      >
         <ScrollArea.Viewport
           className={cn(viewportVariants({ insetX }), viewportClassName)}
           style={{ overflowX, overflowY }}
@@ -234,19 +265,61 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
               }),
               listClassName
             )}
-            style={gridTemplateColumns ? { gridTemplateColumns } : undefined}
+            style={{
+              ...(gridTemplateColumns ? { gridTemplateColumns } : {}),
+              ...(gridTemplateRows ? { gridTemplateRows } : {}),
+
+              // ✅ NEW: masonry columns styles
+              ...(isColumns
+                ? {
+                    columnCount,
+                    columnWidth,
+                    // mimic gap using column-gap
+                    columnGap:
+                      gap === "none"
+                        ? "0px"
+                        : gap === "sm"
+                        ? "8px"
+                        : gap === "lg"
+                        ? "16px"
+                        : "12px", // md default
+                  }
+                : {}),
+            }}
           >
             {React.Children.map(children, (child, i) => {
               if (child == null) return null;
               if (typeof child === "string" || typeof child === "number") return child;
 
               const wrapperStyle =
-                display === "flex"
+                isFlex
                   ? { ...flexChildWidthStyle, ...itemHeightStyle }
-                  : { ...itemHeightStyle }; // grid width handled by tracks
+                  : { ...itemHeightStyle }; // grid/columns width handled by tracks/columns
 
               return (
-                <div key={child.key ?? i} style={wrapperStyle} className="min-w-0">
+                <div
+                  key={child.key ?? i}
+                  style={{
+                    ...wrapperStyle,
+
+                    // ✅ NEW: make each child its own column item
+                    ...(isColumns
+                      ? {
+                          breakInside: "avoid",
+                          WebkitColumnBreakInside: "avoid",
+                          marginBottom:
+                            gap === "none"
+                              ? "0px"
+                              : gap === "sm"
+                              ? "8px"
+                              : gap === "lg"
+                              ? "16px"
+                              : "12px",
+                        }
+                      : {}),
+                  }}
+                  className={cn("min-w-0", isColumns ? "w-full" : "h-full")}
+                >
                   {child}
                 </div>
               );
@@ -255,13 +328,19 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         </ScrollArea.Viewport>
 
         {scrollY !== "none" && (
-          <ScrollArea.Scrollbar orientation="vertical" className="flex select-none touch-none p-[2px]">
+          <ScrollArea.Scrollbar
+            orientation="vertical"
+            className="flex h-full w-2.5 select-none touch-none p-[2px]"
+          >
             <ScrollArea.Thumb className="flex-1 rounded-full bg-border/60" />
           </ScrollArea.Scrollbar>
         )}
 
         {scrollX !== "none" && (
-          <ScrollArea.Scrollbar orientation="horizontal" className="flex select-none touch-none p-[2px]">
+          <ScrollArea.Scrollbar
+            orientation="horizontal"
+            className="flex h-2.5 w-full select-none touch-none p-[2px]"
+          >
             <ScrollArea.Thumb className="flex-1 rounded-full bg-border/60" />
           </ScrollArea.Scrollbar>
         )}

@@ -16,7 +16,7 @@ export default function Toolbar({
   setRowInput,
   colInput,
   setColInput,
-
+  onDeleteGrid,
   onGridChange,
   onCreateNewGrid,
   onCommitGridName,
@@ -97,6 +97,8 @@ export default function Toolbar({
               value={formValue}
               onChange={onFormChange}
               onCommitGridName={onCommitGridName}
+              onDeleteGrid={onDeleteGrid}
+              gridId={gridId}
             />
           </ButtonPopover>
 

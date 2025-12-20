@@ -13,6 +13,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import {
+  TooltipProvider,
+  TooltipHelp,
+} from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
+
 /**
  * schema:
  * {
@@ -68,25 +74,31 @@ export default function FormInput({ schema, value, onChange }) {
 
   const renderDesc = () =>
     s.description ? (
-      <p className="flex justify-end text-[10px] pt-[2px] text-foregroundScale-2">
-        {s.description}
-      </p>
+      <TooltipProvider>
+        <div className="flex justify-end pt-[2px]">
+          <TooltipHelp>
+            {s.description}
+          </TooltipHelp>
+        </div>
+      </TooltipProvider>
     ) : null;
 
   // BUTTON
   if (type === "button") {
     return (
       <div className={s.className}>
-        <Button
-          type="button"
-          variant={s.buttonVariant ?? "default"}
-          size={s.buttonSize ?? "sm"}
-          disabled={s.disabled}
-          onClick={() => s.onAction?.({ value })}
-        >
-          {s.label ?? "Action"}
-        </Button>
-        {renderDesc()}
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant={s.buttonVariant ?? "default"}
+            size={s.buttonSize ?? "sm"}
+            disabled={s.disabled}
+            onClick={() => s.onAction?.({ value })}
+          >
+            {s.label ?? "Action"}
+          </Button>
+          {renderDesc()}
+        </div>
       </div>
     );
   }
@@ -106,7 +118,12 @@ export default function FormInput({ schema, value, onChange }) {
   if (type === "text-input") {
     return (
       <div className={`${s.className ?? ""} text-xs`}>
-        {s.label && <Label>{s.label}</Label>}
+        {(s.label || s.description) && (
+          <div style={{ minHeight: "18px" }} className="flex items-center justify-between gap-2">
+            {s.label && <Label>{s.label}</Label>}
+            {renderDesc()}
+          </div>
+        )}
         <Input
           type="text"
           value={current ?? ""}
@@ -114,7 +131,6 @@ export default function FormInput({ schema, value, onChange }) {
           disabled={s.disabled}
           onChange={(e) => update(s.key, e.target.value)}
         />
-        {renderDesc()}
       </div>
     );
   }
@@ -123,10 +139,15 @@ export default function FormInput({ schema, value, onChange }) {
   if (type === "number-input") {
     return (
       <div className={`${s.className ?? ""}`}>
-        {s.label && <Label>{s.label}</Label>}
+        {(s.label || s.description) && (
+          <div style={{ minHeight: "18px" }} className="flex items-center justify-between gap-2">
+            {s.label && <Label>{s.label}</Label>}
+            {renderDesc()}
+          </div>
+        )}
         <Input
           type="number"
-          value={Number.isFinite(current) ? current : (current ?? 0)}
+          value={Number.isFinite(current) ? current : current ?? 0}
           min={s.min}
           max={s.max}
           step={s.step}
@@ -134,7 +155,6 @@ export default function FormInput({ schema, value, onChange }) {
           disabled={s.disabled}
           onChange={(e) => update(s.key, safeNum(e.target.value, current ?? 0))}
         />
-        {renderDesc()}
       </div>
     );
   }
@@ -144,7 +164,12 @@ export default function FormInput({ schema, value, onChange }) {
     const opts = s.options ?? [];
     return (
       <div className={`${s.className ?? ""}`}>
-        {s.label && <Label>{s.label}</Label>}
+        {(s.label || s.description) && (
+          <div style={{ minHeight: "18px" }} className="flex items-center justify-between gap-2">
+            {s.label && <Label>{s.label}</Label>}
+            {renderDesc()}
+          </div>
+        )}
         <Select
           value={current ?? undefined}
           onValueChange={(v) => update(s.key, v)}
@@ -161,7 +186,6 @@ export default function FormInput({ schema, value, onChange }) {
             ))}
           </SelectContent>
         </Select>
-        {renderDesc()}
       </div>
     );
   }
@@ -171,15 +195,15 @@ export default function FormInput({ schema, value, onChange }) {
     const checked = !!current;
     return (
       <div className={`${s.className ?? ""}`}>
-        <div className="flex items-center justify-between gap-3">
+        <div style={{ minHeight: "18px" }} className="flex items-center gap-2">
           {s.label && <Label>{s.label}</Label>}
-          <Switch
-            checked={checked}
-            disabled={s.disabled}
-            onCheckedChange={(v) => update(s.key, !!v)}
-          />
+          {renderDesc()}
         </div>
-        {renderDesc()}
+        <Switch
+          checked={checked}
+          disabled={s.disabled}
+          onCheckedChange={(v) => update(s.key, !!v)}
+        />
       </div>
     );
   }
@@ -195,9 +219,11 @@ export default function FormInput({ schema, value, onChange }) {
             disabled={s.disabled}
             onCheckedChange={(v) => update(s.key, !!v)}
           />
-          {s.label && <Label>{s.label}</Label>}
+          <div className="flex items-center gap-2">
+            {s.label && <Label>{s.label}</Label>}
+            {renderDesc()}
+          </div>
         </div>
-        {renderDesc()}
       </div>
     );
   }
@@ -218,7 +244,11 @@ export default function FormInput({ schema, value, onChange }) {
     return (
       <div className={`${s.className ?? ""}`}>
         <div className="flex items-center justify-between gap-3">
-          {s.label && <Label>{s.label}</Label>}
+          <div className="flex items-center gap-2">
+            {s.label && <Label>{s.label}</Label>}
+            {renderDesc()}
+          </div>
+
           {showValue && (
             <div className="text-[11px] text-foregroundScale-2 tabular-nums">
               {clamped}
@@ -240,8 +270,6 @@ export default function FormInput({ schema, value, onChange }) {
             }}
           />
         </div>
-
-        {renderDesc()}
       </div>
     );
   }

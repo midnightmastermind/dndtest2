@@ -11,6 +11,7 @@ import {
   createContainerAction,
   createInstanceInContainerAction,
 } from "./state/actions";
+  import { deleteGridAction } from "./state/actions";
 
 import Grid from "./Grid";
 import LoginScreen from "./LoginScreen";
@@ -25,7 +26,7 @@ import SortableContainer from "./SortableContainer";
 import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
 import Toolbar from "./Toolbar";
-
+import { SpinnerOverlay } from "./components/ui/spinner";
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
   for (let r = 0; r < rows; r++) {
@@ -227,6 +228,20 @@ export default function App() {
     [dispatch, state.instances]
   );
 
+
+const deleteGridFinal = () => {
+  const gridId = state?.gridId || state?.grid?._id;
+  if (!gridId) return;
+
+  // optimistic remove from local state (matches reducer + bindSocketToStore)
+  dispatch(deleteGridAction(gridId)); // payload: { gridId } :contentReference[oaicite:4]{index=4}
+
+  // tell backend (server should accept { gridId })
+  socket.emit("delete_grid", { gridId });
+
+  // optional: clear any local pointers
+};
+
   // -----------------------------
   // CONTEXT VALUES
   // -----------------------------
@@ -273,7 +288,7 @@ export default function App() {
       addInstanceToContainer,
 
       pointerRef: livePointerRef,
-
+      
       handleDragStart,
       handleDragOver,
       handleDragEnd,
@@ -322,10 +337,11 @@ export default function App() {
           onUpdateRows={updateRows}
           onUpdateCols={updateCols}
           onAddPanel={addNewPanel}
+          onDeleteGrid={deleteGridFinal}
         />
 
         <div className="app-root grid-frame bg-background2 ring-1 ring-black/40 rounded-xl p-3 shadow-inner border border-border">
-          {state.grid?._id ? <Grid components={components} /> : <div>Loading grid…</div>}
+          {state.grid?._id ? <Grid components={components} /> : <SpinnerOverlay label="Syncing grid…" />}
         </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>

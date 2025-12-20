@@ -337,30 +337,30 @@ io.on("connection", (socket) => {
       if (!uc.gridsById[gridId]) {
         const g = await Grid.findOne({ _id: gridId, userId }).lean();
         if (!g) {
-  console.log("❌ Grid not found or unauthorized:", gridId);
+          console.log("❌ Grid not found or unauthorized:", gridId);
 
-  // ✅ fallback: pick first grid for this user, or create one
-  const userGrids = Object.keys(uc.gridsById);
-  if (userGrids.length) {
-    const fallbackId = userGrids[0];
-    uc.activeGridId = fallbackId;
-    return emitFullState(fallbackId);
-  }
+          // ✅ fallback: pick first grid for this user, or create one
+          const userGrids = Object.keys(uc.gridsById);
+          if (userGrids.length) {
+            const fallbackId = userGrids[0];
+            uc.activeGridId = fallbackId;
+            return emitFullState(fallbackId);
+          }
 
-  // no grids at all -> create one
-  const newGrid = await Grid.create({
-    rows: 2,
-    cols: 3,
-    rowSizes: [],
-    colSizes: [],
-    userId,
-  });
+          // no grids at all -> create one
+          const newGrid = await Grid.create({
+            rows: 2,
+            cols: 3,
+            rowSizes: [],
+            colSizes: [],
+            userId,
+          });
 
-  const newId = newGrid._id.toString();
-  uc.gridsById[newId] = newGrid.toObject();
-  uc.activeGridId = newId;
-  return emitFullState(newId);
-}
+          const newId = newGrid._id.toString();
+          uc.gridsById[newId] = newGrid.toObject();
+          uc.activeGridId = newId;
+          return emitFullState(newId);
+        }
         uc.gridsById[gridId] = g; // lean object (already plain)
       }
 
@@ -532,6 +532,43 @@ io.on("connection", (socket) => {
       socket.emit("server_error", "Failed to update container");
     }
   });
+  // ======================================================
+  // CONTAINER UPDATE (label/items/etc) — UPSERT
+  // emits: container_updated
+  // ======================================================
+  socket.on("update_container", async ({ container } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const id = container?.id;
+      if (!id) return;
+
+      const prev = uc.containersById[id] || { id, label: "Untitled", items: [] };
+
+      const next = {
+        id,
+        label: container.label ?? prev.label ?? "Untitled",
+        items: Array.isArray(container.items) ? container.items : prev.items ?? [],
+      };
+
+      uc.containersById[id] = next;
+
+      await Container.findOneAndUpdate(
+        { id, userId },
+        { ...next, userId },
+        { upsert: true }
+      );
+
+      io.emit("container_updated", { container: next });
+    } catch (err) {
+      console.error("update_container error:", err);
+      socket.emit("server_error", "Failed to update container");
+    }
+  });
 
   // ======================================================
   // INSTANCE UPDATE (now UPSERTS instance if missing)
@@ -567,6 +604,68 @@ io.on("connection", (socket) => {
       socket.emit("server_error", "Failed to update instance");
     }
   });
+ // ======================================================
+// INSTANCE DELETE — cascade:
+// - delete instance
+// - pull instanceId out of ALL containers.items
+// - emit instance_deleted + container_items_updated for affected containers
+// ======================================================
+socket.on("delete_instance", async ({ instanceId } = {}) => {
+  try {
+    const userId = socket.userId;
+    if (!userId) return;
+    if (!instanceId) return;
+
+    if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+    const uc = ensureUserCache(userId);
+
+    // -----------------------------
+    // 1) Remove instance from cache + DB
+    // -----------------------------
+    if (uc.instancesById?.[instanceId]) delete uc.instancesById[instanceId];
+
+    // If your Instance documents are keyed by `id` (NOT _id), this is correct:
+    await Instance.findOneAndDelete({ id: instanceId, userId });
+
+    // -----------------------------
+    // 2) Cascade: remove instanceId from ALL containers.items
+    //    - cache
+    //    - DB
+    //    - emit container_items_updated for affected containers
+    // -----------------------------
+    const affectedContainers = [];
+
+    for (const c of Object.values(uc.containersById || {})) {
+      if (!Array.isArray(c.items)) continue;
+      if (!c.items.includes(instanceId)) continue;
+
+      const nextItems = c.items.filter((iid) => iid !== instanceId);
+      c.items = nextItems; // mutate cache in-place (ok here)
+
+      affectedContainers.push({ containerId: c.id, items: nextItems });
+    }
+
+    // DB pull from any container docs that reference this instanceId
+    await Container.updateMany(
+      { userId, items: instanceId },
+      { $pull: { items: instanceId } }
+    );
+
+    // Notify clients: containers that changed
+    for (const { containerId, items } of affectedContainers) {
+      io.emit("container_items_updated", { containerId, items });
+    }
+
+    // -----------------------------
+    // 3) Notify instance deleted
+    // -----------------------------
+    io.emit("instance_deleted", { instanceId });
+  } catch (err) {
+    console.error("delete_instance error:", err);
+    socket.emit("server_error", "Failed to delete instance");
+  }
+});
+
 
   // ======================================================
   // PANELS (userId ONLY - gridId ignored)
@@ -635,6 +734,122 @@ io.on("connection", (socket) => {
       socket.emit("server_error", "Failed to add panel");
     }
   });
+  // ======================================================
+  // PANEL DELETE (userId ONLY - gridId ignored)
+  // ======================================================
+  socket.on("delete_panel", async ({ panelId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!panelId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      // remove from cache
+      if (uc.panelsById?.[panelId]) delete uc.panelsById[panelId];
+
+      // remove from DB
+      await Panel.findOneAndDelete({ id: panelId, userId });
+
+      // notify clients (bindSocketToStore expects panel_deleted)
+      io.emit("panel_deleted", { panelId });
+    } catch (err) {
+      console.error("delete_panel error:", err);
+      socket.emit("server_error", "Failed to delete panel");
+    }
+  });
+  // ======================================================
+  // CONTAINER DELETE — deletes container + (optionally) its instances
+  // emits: container_deleted (+ instance_deleted for cascaded instances)
+  // ======================================================
+// ======================================================
+// CONTAINER DELETE — removes container + pulls from ALL panels.containers
+// (does NOT delete instances)
+// emits: container_deleted, panel_updated (for each affected panel)
+// ======================================================
+socket.on("delete_container", async ({ containerId } = {}) => {
+  try {
+    const userId = socket.userId;
+    if (!userId) return;
+    if (!containerId) return;
+
+    if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+    const uc = ensureUserCache(userId);
+
+    // -----------------------------
+    // 1) Remove container from cache + DB
+    // -----------------------------
+    if (uc.containersById?.[containerId]) delete uc.containersById[containerId];
+
+    await Container.findOneAndDelete({ id: containerId, userId });
+
+    // -----------------------------
+    // 2) Cascade: remove containerId from ALL panels.containers
+    //    - update cache
+    //    - update DB
+    //    - emit panel_updated per affected panel
+    // -----------------------------
+    const affectedPanels = [];
+
+    for (const p of Object.values(uc.panelsById || {})) {
+      if (!Array.isArray(p.containers)) continue;
+      if (!p.containers.includes(containerId)) continue;
+
+      const next = {
+        ...p,
+        containers: p.containers.filter((cid) => cid !== containerId),
+      };
+
+      uc.panelsById[next.id] = next;
+      affectedPanels.push(next);
+    }
+
+    // persist once (bulk) — remove from all panels for this user
+    await Panel.updateMany(
+      { userId, containers: containerId },
+      { $pull: { containers: containerId } }
+    );
+
+    // notify clients about panel changes
+    for (const panel of affectedPanels) {
+      io.emit("panel_updated", panel);
+    }
+
+     // -----------------------------
+    // 3) Cascade: delete instances referenced by container.items
+    //    - cache
+    //    - DB
+    //    - emit instance_deleted per id
+    // -----------------------------
+   /* if (instanceIdsToDelete.length) {
+      for (const iid of instanceIdsToDelete) {
+        if (uc.instancesById?.[iid]) delete uc.instancesById[iid];
+      }
+
+
+      await Instance.deleteMany({ userId, id: { $in: instanceIdsToDelete } });
+
+      await Container.updateMany(
+        { userId, items: { $in: instanceIdsToDelete } },
+        { $pull: { items: { $in: instanceIdsToDelete } } }
+      );
+
+      for (const iid of instanceIdsToDelete) {
+        io.emit("instance_deleted", { instanceId: iid });
+      }
+    }*/
+    // -----------------------------
+    // 3) Notify clients container is gone
+    // -----------------------------
+    io.emit("container_deleted", { containerId });
+  } catch (err) {
+    console.error("delete_container error:", err);
+    socket.emit("server_error", "Failed to delete container");
+  }
+});
+
 
   // ======================================================
   // GRID UPDATE (grid is gridId + userId) — now UPSERTS
@@ -691,6 +906,82 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("update_grid error:", err);
       socket.emit("server_error", "Failed to update grid");
+    }
+  });
+  // ======================================================
+  // GRID DELETE (grid is gridId + userId)
+  // ======================================================
+  socket.on("delete_grid", async ({ gridId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!gridId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      // delete from DB
+      await Grid.findOneAndDelete({ _id: gridId, userId });
+
+      // delete from cache
+      if (uc.gridsById?.[gridId]) delete uc.gridsById[gridId];
+
+      // if active grid was deleted, pick a new one (or create one)
+      if (uc.activeGridId === gridId) {
+        const remaining = Object.keys(uc.gridsById);
+
+        if (remaining.length) {
+          uc.activeGridId = remaining[0];
+        } else {
+          const newGrid = await Grid.create({
+            rows: 2,
+            cols: 3,
+            rowSizes: [],
+            colSizes: [],
+            userId,
+            name: "",
+          });
+
+          const newId = newGrid._id.toString();
+          uc.gridsById[newId] = newGrid.toObject();
+          uc.activeGridId = newId;
+        }
+
+        // keep the deleting client in a good state immediately
+        const grids = await getAllGridsForUser(userId);
+        const gid = uc.activeGridId;
+        const safeGrid = uc.gridsById[gid];
+        // OPTIONAL: remove panels that belonged to this grid
+        const panelsToDelete = Object.values(uc.panelsById).filter(
+          (p) => p.gridId === gridId
+        );
+
+        for (const p of panelsToDelete) {
+          delete uc.panelsById[p.id];
+        }
+
+        await Panel.deleteMany({ userId, gridId });
+        if (panelsToDelete.length) {
+          for (const p of panelsToDelete) {
+            io.emit("panel_deleted", { panelId: p.id });
+          }
+        }
+        socket.emit("full_state", {
+          gridId: gid,
+          grid: safeGrid,
+          panels: Object.values(uc.panelsById),
+          containers: Object.values(uc.containersById),
+          instances: Object.values(uc.instancesById),
+          grids,
+        });
+      }
+
+      // notify all clients
+      io.emit("grid_deleted", { gridId });
+    } catch (err) {
+      console.error("delete_grid error:", err);
+      socket.emit("server_error", "Failed to delete grid");
     }
   });
 

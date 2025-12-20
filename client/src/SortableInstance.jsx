@@ -27,7 +27,6 @@ function SortableInstanceInner({ instance, containerId, panelId }) {
     opacity: isDragging ? 0 : 1,
   };
 
-  
 
 return (
   <div

@@ -2,15 +2,263 @@
 import React from "react";
 import { Separator } from "@/components/ui/separator";
 import FormInput from "./FormInput";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export default function LayoutForm({ value, onChange }) {
-  const display = value?.display ?? "grid";
-  const flow = value?.flow ?? "row";
+import { TooltipProvider, TooltipHelp } from "@/components/ui/tooltip";
+
+import {
+  LayoutGrid,
+  Columns,
+  ArrowLeftRight,
+  ArrowUpDown,
+  BrickWall,
+} from "lucide-react";
+
+const LAYOUT_PRESETS = [
+  {
+    id: "grid-cards",
+    label: "Grid Cards",
+    Icon: LayoutGrid,
+    hint: "Responsive dashboard grid",
+    description:
+      "Responsive card grid. Uses auto-fill columns (based on Min width) so items wrap into as many columns as fit.",
+    autoFill: true,
+    values: {
+      display: "grid",
+      flow: "row",
+      columns: 0, // auto-fill
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 0, // uses fallback 170 in ListWrapper
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "start",
+      alignContent: "start",
+      justify: "start",
+      wrap: "wrap",
+      gapPx: 12,
+      gapPreset: "md",
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+
+  {
+    id: "h-scroll-row",
+    label: "H Scroll",
+    Icon: ArrowLeftRight,
+    hint: "Single row, scroll sideways",
+    description:
+      "One horizontal row (no wrap). Items keep a fixed width and you scroll sideways to see more.",
+    autoFill: false,
+    values: {
+      display: "flex",
+      flow: "row",
+      wrap: "nowrap",
+      columns: 0,
+      rows: 0,
+
+      widthMode: "fixed",
+      fixedWidth: 280,
+      minWidthPx: 0,
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "start",
+      alignContent: "start",
+      justify: "start",
+      gapPx: 12,
+      gapPreset: "md",
+
+      scrollX: "always",
+      scrollY: "none",
+      scrollType: "always",
+    },
+  },
+
+  {
+    id: "v-stack",
+    label: "V Stack",
+    Icon: ArrowUpDown,
+    hint: "Classic vertical list",
+    description:
+      "Classic vertical list. Full-width items stacked top → bottom with vertical scrolling.",
+    autoFill: false,
+    values: {
+      display: "flex",
+      flow: "col",
+      wrap: "wrap",
+      columns: 0,
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 0,
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "stretch",
+      alignContent: "start",
+      justify: "start",
+      gapPx: 8,
+      gapPreset: "sm",
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+
+  {
+    id: "grid-3col",
+    label: "3 Columns",
+    Icon: Columns,
+    hint: "Exactly 3 columns",
+    description:
+      "Locked column count. Always exactly 3 columns, regardless of viewport width (items resize within those tracks).",
+    autoFill: false,
+    values: {
+      display: "grid",
+      flow: "row",
+      columns: 3,
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 0,
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "stretch",
+      alignContent: "start",
+      justify: "start",
+      gapPx: 12,
+      gapPreset: "md",
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+
+  {
+    id: "masonryish",
+    label: "Masonry-ish",
+    Icon: BrickWall,
+    hint: "Dense packed feel",
+    description:
+      "Auto-fill grid with a larger Min width for ‘Pinterest-ish’ density. Note: this is not true masonry (CSS Grid won’t stack into columns by height).",
+    autoFill: true,
+    values: {
+      display: "grid",
+      flow: "row",
+      columns: 0, // auto-fill
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 220,
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "start",
+      alignContent: "start",
+      justify: "start",
+      gapPx: 8,
+      gapPreset: "sm",
+      dense: true,
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+
+  // ✅ NEW: True masonry via CSS columns
+  {
+    id: "masonry-columns",
+    label: "Masonry",
+    Icon: BrickWall,
+    hint: "True column masonry (CSS columns)",
+    description:
+      "True masonry via CSS columns. Items flow top→bottom per column (no shared grid rows).",
+    autoFill: true,
+    values: {
+      display: "columns",
+      flow: "col", // informational
+      columns: 0, // 0 = responsive by min width (column-width)
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 220, // baseline column width
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "start",
+      alignContent: "start",
+      justify: "start",
+      wrap: "wrap",
+      gapPx: 8,
+      gapPreset: "sm",
+      dense: true,
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+];
+
+function applyPreset(current, presetValues) {
+  const name = current?.name ?? "";
+  return { ...current, ...presetValues, name };
+}
+
+function ensureLockDefaults(next) {
+  const base = next ?? {};
+  const lock = base?.lock ?? {};
+  return {
+    ...base,
+    lock: {
+      enabled: lock?.enabled ?? false,
+      containersDrag: lock?.containersDrag ?? true,
+      containersDrop: lock?.containersDrop ?? true,
+      instancesDrag: lock?.instancesDrag ?? true,
+      instancesDrop: lock?.instancesDrop ?? true,
+    },
+  };
+}
+
+export default function LayoutForm({ value, onChange, onDeletePanel, panelId }) {
+  const v = ensureLockDefaults(value);
+
+  const display = v?.display ?? "grid";
+  const flow = v?.flow ?? "row";
 
   const isGrid = display === "grid";
   const isFlex = display === "flex";
-
-  const columnsVal = Number(value?.columns ?? 0);
+  const isColumns = display === "columns";
+  const isGridLike = isGrid || isColumns;
 
   const columnOptions = [
     { value: "0", label: "Auto" },
@@ -22,8 +270,20 @@ export default function LayoutForm({ value, onChange }) {
 
   const showWrap = isFlex && flow === "row";
 
-  const widthMode = value?.widthMode ?? "auto";   // "auto" | "fixed"
-  const heightMode = value?.heightMode ?? "auto"; // ✅ NEW: "auto" | "fixed"
+  const widthMode = v?.widthMode ?? "auto";
+  const heightMode = v?.heightMode ?? "auto";
+
+  const setLock = (patch) => {
+    onChange?.({
+      ...v,
+      lock: {
+        ...v.lock,
+        ...patch,
+      },
+    });
+  };
+
+  const lockEnabled = !!v?.lock?.enabled;
 
   return (
     <div className="font-mono max-h-[70vh] overflow-y-auto pr-2">
@@ -34,8 +294,6 @@ export default function LayoutForm({ value, onChange }) {
         </p>
       </div>
 
-      <Separator />
-
       {/* Name */}
       <FormInput
         schema={{
@@ -44,9 +302,219 @@ export default function LayoutForm({ value, onChange }) {
           label: "Name",
           placeholder: "Panel layout name",
         }}
-        value={value}
-        onChange={onChange}
+        value={v}
+        onChange={(next) => onChange?.(ensureLockDefaults(next))}
       />
+
+      <Separator />
+
+      <div className="pt-2">
+        <h4 className="text-xs font-semibold text-red-400">Danger zone</h4>
+        <p className="text-[10px] text-foregroundScale-2/80 mt-1">
+          This deletes the panel and all UI inside it (containers/instances will be orphaned unless your backend cascades).
+        </p>
+
+        <div className="mt-2">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              const ok = window.confirm(
+                `Delete this panel${panelId ? ` (${panelId})` : ""}? This cannot be undone.`
+              );
+              if (!ok) return;
+              onDeletePanel?.();
+            }}
+            disabled={!onDeletePanel}
+          >
+            Delete panel
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* ✅ NEW: Lock / Permissions */}
+      <div className="pt-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-foregroundScale-2">Lock</h4>
+          <span className="text-[10px] opacity-70">Drag/drop permissions</span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormInput
+            schema={{
+              type: "toggle",
+              key: "__lockEnabled",
+              label: "Lock panel interactions",
+              description:
+                "When enabled, the options below decide what dragging/dropping is allowed inside this panel.",
+            }}
+            value={{ __lockEnabled: lockEnabled }}
+            onChange={(next) => setLock({ enabled: !!next?.__lockEnabled })}
+          />
+
+          <div className="text-[10px] leading-snug text-foregroundScale-2/80 border border-borderScale-0/40 rounded-md p-2">
+            Tip: you can “freeze” a panel by turning off drag/drop for both
+            Containers and Instances.
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            "mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3",
+            !lockEnabled && "opacity-60"
+          )}
+        >
+          <FormInput
+            schema={{
+              type: "toggle",
+              key: "__containersDrag",
+              label: "Containers can drag",
+              description: "Allow reordering / moving containers.",
+            }}
+            value={{ __containersDrag: !!v.lock.containersDrag }}
+            onChange={(next) =>
+              setLock({ containersDrag: !!next?.__containersDrag })
+            }
+            disabled={!lockEnabled}
+          />
+
+          <FormInput
+            schema={{
+              type: "toggle",
+              key: "__containersDrop",
+              label: "Containers can drop",
+              description: "Allow dropping containers into this panel.",
+            }}
+            value={{ __containersDrop: !!v.lock.containersDrop }}
+            onChange={(next) =>
+              setLock({ containersDrop: !!next?.__containersDrop })
+            }
+            disabled={!lockEnabled}
+          />
+
+          <FormInput
+            schema={{
+              type: "toggle",
+              key: "__instancesDrag",
+              label: "Instances can drag",
+              description: "Allow dragging instances within/between containers.",
+            }}
+            value={{ __instancesDrag: !!v.lock.instancesDrag }}
+            onChange={(next) =>
+              setLock({ instancesDrag: !!next?.__instancesDrag })
+            }
+            disabled={!lockEnabled}
+          />
+
+          <FormInput
+            schema={{
+              type: "toggle",
+              key: "__instancesDrop",
+              label: "Instances can drop",
+              description: "Allow dropping instances into this panel/containers.",
+            }}
+            value={{ __instancesDrop: !!v.lock.instancesDrop }}
+            onChange={(next) =>
+              setLock({ instancesDrop: !!next?.__instancesDrop })
+            }
+            disabled={!lockEnabled}
+          />
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* ✅ Presets (button uses TooltipHelp for description) */}
+      <div className="pt-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-foregroundScale-2">Presets</h4>
+          <span className="text-[10px] opacity-70">Tap to autofill</span>
+        </div>
+
+        <TooltipProvider>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {LAYOUT_PRESETS.map((p) => {
+              const Icon = p.Icon;
+              const isActive = v?.presetId === p.id;
+
+              return (
+                <div key={p.id} className="flex flex-col gap-1">
+                  <div className="flex items-start">
+                    <Button
+                      type="button"
+                      variant={isActive ? "secondary" : "ghost"}
+                      size="sm"
+                      className={cn(
+                        "h-10 px-2 flex-1 flex flex-col items-center justify-center gap-1",
+                        "rounded-md border border-borderScale-0/40"
+                      )}
+                      onClick={() => {
+                        onChange?.(
+                          ensureLockDefaults(
+                            applyPreset({ ...v, presetId: p.id }, p.values)
+                          )
+                        );
+                      }}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span className="text-[9px] leading-none">{p.label}</span>
+                    </Button>
+
+                    {/* ✅ your TooltipHelp: the ? pill trigger */}
+                    <TooltipHelp size="sm">
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-semibold">{p.label}</div>
+                        {p.hint && (
+                          <div className="text-[10px] text-muted-foreground">
+                            {p.hint}
+                          </div>
+                        )}
+                        {p.description && (
+                          <div className="text-[11px] leading-snug">
+                            {p.description}
+                          </div>
+                        )}
+                        <div className="pt-1 text-[10px] text-muted-foreground">
+                          Auto-fill:{" "}
+                          <span className="text-foreground">
+                            {p.autoFill ? "Yes" : "No"}
+                          </span>
+                        </div>
+                      </div>
+                    </TooltipHelp>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </TooltipProvider>
+
+        <p className="mt-2 text-[11px] text-foregroundScale-2">
+          Presets set a “known-good” combo. Everything below still works as overrides.
+        </p>
+
+        <p className="mt-1 text-[10px] text-foregroundScale-2/80">
+          In your <span className="text-foregroundScale-1">ListWrapper</span>,{" "}
+          <span className="text-foregroundScale-1">Columns = Auto (0)</span> uses{" "}
+          <span className="text-foregroundScale-1">
+            repeat(auto-fill, minmax(MinWidth, ...))
+          </span>
+          . That’s the “autofill” behavior for Grid.
+        </p>
+
+        <p className="mt-1 text-[10px] text-foregroundScale-2/80">
+          For <span className="text-foregroundScale-1">Masonry (Columns)</span>,{" "}
+          <span className="text-foregroundScale-1">Columns = Auto (0)</span> uses{" "}
+          <span className="text-foregroundScale-1">column-width</span> (based on Min
+          width), and items flow top→bottom per column.
+        </p>
+      </div>
+
+
+      <Separator />
 
       {/* Display */}
       <FormInput
@@ -57,25 +525,24 @@ export default function LayoutForm({ value, onChange }) {
           options: [
             { value: "grid", label: "Grid" },
             { value: "flex", label: "Flex" },
+            { value: "columns", label: "Masonry (Columns)" },
           ],
         }}
-        value={value}
+        value={v}
         onChange={(next) => {
           const nextDisplay = next?.display ?? "grid";
+          const base = ensureLockDefaults({ ...next, display: nextDisplay });
 
-          // nudge sane defaults when switching
-          const base = { ...next, display: nextDisplay };
-
-          if (nextDisplay === "grid") {
+          if (nextDisplay === "grid" || nextDisplay === "columns") {
             onChange?.({
               ...base,
-              columns: Number.isFinite(Number(base.columns)) ? Number(base.columns) : 0,
+              columns: Number.isFinite(Number(base.columns))
+                ? Number(base.columns)
+                : 0,
             });
             return;
           }
 
-
-          // flex
           onChange?.({
             ...base,
             wrap: base.wrap ?? "wrap",
@@ -83,7 +550,7 @@ export default function LayoutForm({ value, onChange }) {
         }}
       />
 
-      {/* Flow (both grid+flex use it) */}
+      {/* Flow */}
       <FormInput
         schema={{
           type: "select",
@@ -94,11 +561,10 @@ export default function LayoutForm({ value, onChange }) {
             { value: "col", label: "Column (top → bottom)" },
           ],
         }}
-        value={value}
-        onChange={onChange}
+        value={v}
+        onChange={(next) => onChange?.(ensureLockDefaults(next))}
       />
 
-      {/* Flex-only + Row-only: Wrap */}
       {showWrap && (
         <FormInput
           schema={{
@@ -111,14 +577,12 @@ export default function LayoutForm({ value, onChange }) {
             ],
             description: "Only applies to Flex + Row flow.",
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       )}
 
-      {/* Width + Height + Justify */}
       <Separator />
-
       {/* WIDTH */}
       <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <FormInput
@@ -131,8 +595,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "fixed", label: "Fixed" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         {widthMode === "fixed" ? (
@@ -145,8 +609,8 @@ export default function LayoutForm({ value, onChange }) {
               max: 4000,
               description: "Sets list width directly.",
             }}
-            value={value}
-            onChange={onChange}
+            value={v}
+            onChange={(next) => onChange?.(ensureLockDefaults(next))}
           />
         ) : (
           <FormInput
@@ -156,10 +620,13 @@ export default function LayoutForm({ value, onChange }) {
               label: "Min width (px)",
               min: 0,
               max: 4000,
-              description: "0 = none (auto).",
+              description:
+                isColumns
+                  ? "0 = none (auto). In columns mode this is the column-width baseline."
+                  : "0 = none (auto).",
             }}
-            value={value}
-            onChange={onChange}
+            value={v}
+            onChange={(next) => onChange?.(ensureLockDefaults(next))}
           />
         )}
 
@@ -172,12 +639,12 @@ export default function LayoutForm({ value, onChange }) {
             max: 8000,
             description: widthMode === "fixed" ? "Optional clamp. 0 = none." : "0 = none.",
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       </div>
 
-      {/* HEIGHT ✅ NEW */}
+      {/* HEIGHT */}
       <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <FormInput
           schema={{
@@ -189,8 +656,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "fixed", label: "Fixed" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         {heightMode === "fixed" ? (
@@ -203,8 +670,8 @@ export default function LayoutForm({ value, onChange }) {
               max: 8000,
               description: "Sets list height directly. 0 = none.",
             }}
-            value={value}
-            onChange={onChange}
+            value={v}
+            onChange={(next) => onChange?.(ensureLockDefaults(next))}
           />
         ) : (
           <FormInput
@@ -216,8 +683,8 @@ export default function LayoutForm({ value, onChange }) {
               max: 8000,
               description: "0 = none (auto).",
             }}
-            value={value}
-            onChange={onChange}
+            value={v}
+            onChange={(next) => onChange?.(ensureLockDefaults(next))}
           />
         )}
 
@@ -230,49 +697,50 @@ export default function LayoutForm({ value, onChange }) {
             max: 8000,
             description: heightMode === "fixed" ? "Optional clamp. 0 = none." : "0 = none.",
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       </div>
-      
-<FormInput
-  schema={{
-    type: "select",
-    key: "alignItems",
-    label: "Align items",
-    options: [
-      { value: "start", label: "Start" },
-      { value: "center", label: "Center" },
-      { value: "end", label: "End" },
-      { value: "stretch", label: "Stretch" },
-      ...(isFlex ? [{ value: "baseline", label: "Baseline" }] : []),
-    ],
-    description: "align-items (cross-axis alignment of items).",
-  }}
-  value={value}
-  onChange={onChange}
-/>
-<FormInput
-  schema={{
-    type: "select",
-    key: "alignContent",
-    label: "Align content",
-    options: [
-      { value: "start", label: "Start" },
-      { value: "center", label: "Center" },
-      { value: "end", label: "End" },
-      { value: "between", label: "Space between" },
-      { value: "around", label: "Space around" },
-      { value: "evenly", label: "Space evenly" },
-      { value: "stretch", label: "Stretch" },
-    ],
-    description:
-      "align-content (only matters when there’s extra space: flex-wrap or grid with spare space).",
-  }}
-  value={value}
-  onChange={onChange}
-/>
-      {/* JUSTIFY */}
+
+      <FormInput
+        schema={{
+          type: "select",
+          key: "alignItems",
+          label: "Align items",
+          options: [
+            { value: "start", label: "Start" },
+            { value: "center", label: "Center" },
+            { value: "end", label: "End" },
+            { value: "stretch", label: "Stretch" },
+            ...(isFlex ? [{ value: "baseline", label: "Baseline" }] : []),
+          ],
+          description: "align-items (cross-axis alignment of items).",
+        }}
+        value={v}
+        onChange={(next) => onChange?.(ensureLockDefaults(next))}
+      />
+
+      <FormInput
+        schema={{
+          type: "select",
+          key: "alignContent",
+          label: "Align content",
+          options: [
+            { value: "start", label: "Start" },
+            { value: "center", label: "Center" },
+            { value: "end", label: "End" },
+            { value: "between", label: "Space between" },
+            { value: "around", label: "Space around" },
+            { value: "evenly", label: "Space evenly" },
+            { value: "stretch", label: "Stretch" },
+          ],
+          description:
+            "align-content (only matters when there’s extra space: flex-wrap or grid with spare space).",
+        }}
+        value={v}
+        onChange={(next) => onChange?.(ensureLockDefaults(next))}
+      />
+
       <FormInput
         schema={{
           type: "select",
@@ -288,40 +756,45 @@ export default function LayoutForm({ value, onChange }) {
           ],
           description: "Applies justify-content to the list container.",
         }}
-        value={value}
-        onChange={onChange}
+        value={v}
+        onChange={(next) => onChange?.(ensureLockDefaults(next))}
       />
 
       <Separator />
 
       <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Grid-only: Columns */}
-        {isGrid && (
+        {/* Grid + Columns: Columns */}
+        {isGridLike && (
           <FormInput
             schema={{
               type: "select",
               key: "columns",
               label: "Columns",
               options: columnOptions,
-              description: "Auto = auto-fill by min item width.",
+              description:
+                isColumns
+                  ? "Auto = responsive by Min width (column-width). Set a number to force a fixed column count."
+                  : "Auto = auto-fill by min item width.",
             }}
             value={{
-              ...value,
-              columns: String(value?.columns ?? 0),
+              ...v,
+              columns: String(v?.columns ?? 0),
             }}
             onChange={(next) => {
               const raw = next?.columns ?? "0";
               const n = Number(raw);
-              onChange?.({
-                ...value,
-                ...next,
-                columns: Number.isFinite(n) ? n : 0,
-              });
+              onChange?.(
+                ensureLockDefaults({
+                  ...v,
+                  ...next,
+                  columns: Number.isFinite(n) ? n : 0,
+                })
+              );
             }}
           />
         )}
 
-        {/* Gap (slider → snapped preset) */}
+        {/* Gap */}
         <FormInput
           schema={{
             type: "slider",
@@ -334,26 +807,28 @@ export default function LayoutForm({ value, onChange }) {
             valueSuffix: "px",
             description: "Snaps to none/sm/md/lg internally.",
           }}
-          value={value}
+          value={v}
           onChange={(next) => {
             const px = next?.gapPx ?? 0;
 
             const gapPxToPreset = (n) => {
-              const v = Number(n) || 0;
-              if (v <= 0) return "none";
-              if (v <= 8) return "sm";
-              if (v <= 16) return "md";
+              const vv = Number(n) || 0;
+              if (vv <= 0) return "none";
+              if (vv <= 8) return "sm";
+              if (vv <= 16) return "md";
               return "lg";
             };
 
-            onChange?.({
-              ...next,
-              gapPreset: gapPxToPreset(px),
-            });
+            onChange?.(
+              ensureLockDefaults({
+                ...next,
+                gapPreset: gapPxToPreset(px),
+              })
+            );
           }}
         />
 
-        {/* Optional: preset dropdown as override/visibility */}
+        {/* Gap preset */}
         <FormInput
           schema={{
             type: "select",
@@ -366,18 +841,20 @@ export default function LayoutForm({ value, onChange }) {
               { value: "lg", label: "Large" },
             ],
           }}
-          value={value}
+          value={v}
           onChange={(next) => {
             const preset = next?.gapPreset ?? "md";
             const presetToPx = { none: 0, sm: 8, md: 12, lg: 20 };
-            onChange?.({
-              ...next,
-              gapPx: presetToPx[preset] ?? 12,
-            });
+            onChange?.(
+              ensureLockDefaults({
+                ...next,
+                gapPx: presetToPx[preset] ?? 12,
+              })
+            );
           }}
         />
 
-        {/* Rows (kept for later) */}
+        {/* Rows */}
         <FormInput
           schema={{
             type: "number-input",
@@ -387,22 +864,23 @@ export default function LayoutForm({ value, onChange }) {
             max: 24,
             description: "Reserved for later; 0 = auto.",
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
+        />
+        {/* Dense */}
+        <FormInput
+          schema={{
+            type: "toggle",
+            key: "dense",
+            label: "Dense",
+            description: "Tighter list spacing.",
+          }}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       </div>
 
-      {/* Dense */}
-      <FormInput
-        schema={{
-          type: "toggle",
-          key: "dense",
-          label: "Dense",
-          description: "Tighter list spacing.",
-        }}
-        value={value}
-        onChange={onChange}
-      />
+
 
       <Separator />
 
@@ -418,8 +896,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "none", label: "None" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         <FormInput
@@ -433,8 +911,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "md", label: "Medium" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         <FormInput
@@ -447,8 +925,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "panel", label: "Panel" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       </div>
 
@@ -468,8 +946,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "hover", label: "Hover" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         <FormInput
@@ -483,8 +961,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "always", label: "Always" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         <FormInput
@@ -498,8 +976,8 @@ export default function LayoutForm({ value, onChange }) {
               { value: "always", label: "Always" },
             ],
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
 
         <FormInput
@@ -510,8 +988,8 @@ export default function LayoutForm({ value, onChange }) {
             min: 0,
             max: 5000,
           }}
-          value={value}
-          onChange={onChange}
+          value={v}
+          onChange={(next) => onChange?.(ensureLockDefaults(next))}
         />
       </div>
     </div>

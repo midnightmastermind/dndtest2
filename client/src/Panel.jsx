@@ -1,16 +1,27 @@
-// Panel.jsx
+// Panel.jsx — MERGED: persist layout on panel, derive from panel.layout, debounce backend writes
 import React, { useRef, useMemo, useState, useCallback } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
 import { ActionTypes } from "./state/actions";
 import { emit } from "./socket";
-import { SortableContext, rectSortingStrategy, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-import { Button } from "./components/ui/button"
+import {
+  SortableContext,
+  rectSortingStrategy,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { Button } from "./components/ui/button";
 import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
-import { ListWrapper } from "@/components/ui/list-wrapper"
+import { ListWrapper } from "@/components/ui/list-wrapper";
+import { updatePanelAction, deletePanelAction } from "./state/actions";
+import {
+  Settings,
+  Maximize,
+  Minimize,
+  PlusSquare,
+  GripVertical,
+} from "lucide-react";
 
-import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 // ----------------------------
 // memo helpers
 // ----------------------------
@@ -25,10 +36,81 @@ function sameIdList(a = [], b = []) {
 function pickOverKey(overData) {
   if (!overData) return "";
   const role =
-    typeof overData.role === "string"
-      ? overData.role
-      : String(overData.role ?? "");
+    typeof overData.role === "string" ? overData.role : String(overData.role ?? "");
   return `${role}|${overData.panelId ?? ""}|${overData.containerId ?? ""}`;
+}
+
+/* ------------------------------------------------------------
+   ✅ Layout defaults + merge (back-compat safe)
+------------------------------------------------------------ */
+function getDefaultLayout() {
+  return {
+    name: "",
+    display: "grid", // "grid" | "flex" | "columns"
+    flow: "row",
+    wrap: "wrap",
+    columns: 0,
+    rows: 0,
+
+    gapPx: 12,
+    gapPreset: "md",
+
+    alignItems: "start",
+    alignContent: "start",
+    justify: "start",
+
+    dense: false,
+    insetX: "panel",
+    padding: "none",
+    variant: "default",
+
+    scrollType: "auto",
+    scrollHideDelay: 600,
+    scrollX: "none", // "none" | "auto" | "always"
+    scrollY: "auto", // "none" | "auto" | "always"
+
+    widthMode: "auto", // "auto" | "fixed"
+    fixedWidth: 340,
+    minWidthPx: 0,
+    maxWidthPx: 0,
+
+    heightMode: "auto", // "auto" | "fixed"
+    fixedHeight: 0,
+    minHeightPx: 0,
+    maxHeightPx: 0,
+
+    // if you're using lock in LayoutForm
+    lock: {
+      enabled: false,
+      containersDrag: true,
+      containersDrop: true,
+      instancesDrag: true,
+      instancesDrop: true,
+    },
+  };
+}
+
+function mergeLayout(panelLayout) {
+  const base = getDefaultLayout();
+  const next =
+    panelLayout && typeof panelLayout === "object" ? panelLayout : {};
+
+  return {
+    ...base,
+    ...next,
+    lock: {
+      ...base.lock,
+      ...(next.lock && typeof next.lock === "object" ? next.lock : {}),
+    },
+  };
+}
+
+function gapPxToPreset(px) {
+  const n = Number(px) || 0;
+  if (n <= 0) return "none";
+  if (n <= 8) return "sm";
+  if (n <= 16) return "md";
+  return "lg";
 }
 
 function Panel({
@@ -49,7 +131,7 @@ function Panel({
   addInstanceToContainer,
   instancesById,
   containersById,
-  sizesRef
+  sizesRef,
 }) {
   const resizeTransformRef = useRef({ w: null, h: null });
 
@@ -60,60 +142,10 @@ function Panel({
   const prev = useRef(null);
 
   const SortableContainer = components["SortableContainer"];
-
   const isChildDrag = isContainerDrag || isInstanceDrag;
 
-  function gapPxToPreset(px) {
-    const n = Number(px) || 0;
-    if (n <= 0) return "none";
-    if (n <= 8) return "sm";
-    if (n <= 16) return "md";
-    return "lg";
-  }
-
-  const [layout, setLayout] = useState({
-    name: "",
-    display: "grid",
-    flow: "row",
-    wrap: "wrap",
-    columns: 0,
-    rows: 0,
-
-    gapPx: 12,
-    gapPreset: "md",
-
-    align: "start",
-    dense: false,
-    insetX: "panel",
-    padding: "none",
-    variant: "default",
-
-    scrollType: "auto",
-    scrollHideDelay: 600,
-
-    // ✅ NEW
-    scrollX: "none",   // "none" | "auto" | "always"
-    scrollY: "auto",   // "none" | "auto" | "always"
-    widthMode: "auto",
-    fixedWidth: 340,
-    minWidthPx: 0,
-    maxWidthPx: 0,
-    justify: "start",
-    heightMode: "auto",
-    fixedHeight: 0,
-    minHeightPx: 0,
-    maxHeightPx: 0,
-
-  });
-
-
-
-
   // ✅ panel dropzone on shell (NOT scroll)
-  const {
-    setNodeRef: setPanelDropRef,
-    isOver: isOverPanelDrop,
-  } = useDroppable({
+  const { setNodeRef: setPanelDropRef, isOver: isOverPanelDrop } = useDroppable({
     id: `panelDrop:${panel.id}`,
     data: { role: "panel:drop", panelId: panel.id },
   });
@@ -142,6 +174,7 @@ function Panel({
   })();
 
   const collapsed = false;
+
   const highlightPanel =
     isContainerDrag && (isOverPanelDrop || isOverThisPanel) && !collapsed;
 
@@ -157,7 +190,12 @@ function Panel({
     [panel.id, panel.col, panel.row, panel.width, panel.height]
   );
 
-  const { setNodeRef: setPanelDragRef, attributes, listeners, setActivatorNodeRef } = useDraggable({
+  const {
+    setNodeRef: setPanelDragRef,
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+  } = useDraggable({
     id: panel.id,
     data,
     disabled: fullscreen,
@@ -184,11 +222,52 @@ function Panel({
     return out;
   }, [panel?.containers, containersById]);
 
+  // ----------------------------------------------------------
+  // ✅ Persist helper
+  // ----------------------------------------------------------
+const updatePanelFinal = (updated) => {
+  dispatch(updatePanelAction(updated)); // payload: { panel }
+  emit("update_panel", { panel: updated, gridId: updated.gridId });
+};
 
-  const updatePanelFinal = (updated) => {
-    dispatch({ type: ActionTypes.UPDATE_PANEL, payload: updated });
-    emit("update_panel", { panel: updated, gridId: panel.gridId });
-  };
+const deletePanelFinal = (panelId) => {
+  if (!panelId) return;
+
+  // optimistic
+  dispatch(deletePanelAction(panelId)); // payload: { panelId } :contentReference[oaicite:5]{index=5}
+
+  // backend
+  emit("delete_panel", { panelId });
+};
+
+
+  // ----------------------------------------------------------
+  // ✅ Layout: derive from panel.layout + debounced backend write
+  // ----------------------------------------------------------
+  const layout = useMemo(() => mergeLayout(panel?.layout), [panel?.layout]);
+  const layoutSaveTimer = useRef(null);
+
+  const setLayout = useCallback(
+    (nextLayout) => {
+      const merged = mergeLayout(nextLayout);
+
+      // optimistic UI update immediately (so ListWrapper updates live)
+      dispatch({
+        type: ActionTypes.UPDATE_PANEL,
+        payload: { ...panel, layout: merged },
+      });
+
+      // debounce backend/socket write (sliders, rapid changes)
+      window.clearTimeout(layoutSaveTimer.current);
+      layoutSaveTimer.current = window.setTimeout(() => {
+        emit("update_panel", {
+          panel: { ...panel, layout: merged },
+          gridId: panel.gridId,
+        });
+      }, 150);
+    },
+    [dispatch, panel]
+  );
 
   const toggleFullscreen = () => {
     if (!fullscreen) {
@@ -207,7 +286,6 @@ function Panel({
   };
 
   const getTrackInfo = () => sizesRef?.current ?? null;
-
 
   const colFromPx = (px) => {
     const track = getTrackInfo();
@@ -308,15 +386,14 @@ function Panel({
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
-      ? "2px solid rgba(50,150,255,0.9)"
-      : "none";
+    ? "2px solid rgba(50,150,255,0.9)"
+    : "none";
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
   return (
     <div
       className="panel-card bg-background rounded-lg border border-border shadow-xl"
-
       data-panel-id={panel.id}
       ref={setPanelShellRef}
       style={{
@@ -336,7 +413,8 @@ function Panel({
     >
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         {/* HEADER */}
-        <div className="panel-header bg-overlay/60 border-b border-border flex items-center h-6"
+        <div
+          className="panel-header bg-overlay/60 border-b border-border flex items-center h-6"
           style={{
             borderTopLeftRadius: 8,
             borderTopRightRadius: 8,
@@ -357,26 +435,17 @@ function Panel({
             <GripVertical className="h-4 w-4 text-white" />
           </div>
 
-
-
-
           <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
             <ButtonPopover label={<Settings className="h-4 w-4" />}>
-              <LayoutForm value={layout} onChange={setLayout} />
+              {/* ✅ now edits persist to panel.layout */}
+              <LayoutForm value={layout} onChange={setLayout} onDeletePanel={deletePanelFinal}/>
             </ButtonPopover>
-            <Button
-              size="sm"
-              onClick={() => addContainerToPanel(panel.id)}
-            >
 
+            <Button size="sm" onClick={() => addContainerToPanel(panel.id)}>
               <PlusSquare className="h-4 w-4 pt-[2px]" /> Container
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleFullscreen}
-            >
 
+            <Button variant="ghost" size="sm" onClick={toggleFullscreen}>
               {fullscreen ? (
                 <Minimize className="h-4 w-4" />
               ) : (
@@ -393,74 +462,71 @@ function Panel({
             flex: 1,
             minHeight: 0,
             overflow: "hidden",
-
             display: "flex",
             flexDirection: "column",
           }}
         >
           <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
+          <SortableContext
+            items={panelContainerIds}
+            strategy={rectSortingStrategy}
+            disabled={isInstanceDrag}
+          >
+            <ListWrapper
+              className="h-full w-full"
+              display={layout.display}
+              flow={layout.flow}
+              wrap={layout.display === "flex" ? (layout.wrap ?? "wrap") : undefined}
+              // ✅ support columns mode too
+              columns={
+                layout.display === "grid" || layout.display === "columns"
+                  ? layout.columns
+                  : 0
+              }
+              rows={layout.display === "grid" ? layout.rows : 0}
+              alignContent={layout.alignContent}
+              alignItems={layout.alignItems}
+              dense={layout.dense}
+              gap={gapPresetFinal}
+              insetX={layout.insetX}
+              padding={layout.padding}
+              variant={layout.variant}
+              scrollType={layout.scrollType}
+              scrollHideDelay={layout.scrollHideDelay}
+              scrollX={layout.scrollX}
+              scrollY={layout.scrollY}
+              // ✅ single width/height system used for grid tracks + flex children
+              widthMode={layout.widthMode}
+              fixedWidth={layout.fixedWidth}
+              minWidthPx={layout.minWidthPx}
+              maxWidthPx={layout.maxWidthPx}
+              heightMode={layout.heightMode}
+              fixedHeight={layout.fixedHeight}
+              minHeightPx={layout.minHeightPx}
+              maxHeightPx={layout.maxHeightPx}
+              justify={layout.justify}
+            >
+              {panelContainers.map((c) => (
+                <SortableContainer
+                  key={c.id}
+                  container={c}
+                  panelId={panel.id}
+                  instancesById={instancesById}
+                  addInstanceToContainer={addInstanceToContainer}
+                  isDraggingContainer={isContainerDrag}
+                  isInstanceDrag={isInstanceDrag}
+                  overData={overData}
+                />
+              ))}
 
-         <SortableContext
-  items={panelContainerIds}
-  strategy={rectSortingStrategy}
-  disabled={isInstanceDrag}
->
-<ListWrapper
-  className="h-full w-full"
-  display={layout.display}
-  flow={layout.flow}
-  wrap={layout.display === "flex" ? (layout.wrap ?? "wrap") : undefined}
-
-  columns={layout.display === "grid" ? layout.columns : 0}
-
-  align={layout.align}
-  dense={layout.dense}
-  gap={gapPresetFinal}
-  insetX={layout.insetX}
-  padding={layout.padding}
-  variant={layout.variant}
-  scrollType={layout.scrollType}
-  scrollHideDelay={layout.scrollHideDelay}
-  scrollX={layout.scrollX}
-  scrollY={layout.scrollY}
-
-  // ✅ single width/height system used for grid tracks + flex children
-  widthMode={layout.widthMode}
-  fixedWidth={layout.fixedWidth}
-  minWidthPx={layout.minWidthPx}
-  maxWidthPx={layout.maxWidthPx}
-
-  heightMode={layout.heightMode}
-  fixedHeight={layout.fixedHeight}
-  minHeightPx={layout.minHeightPx}
-  maxHeightPx={layout.maxHeightPx}
-
-  justify={layout.justify}
->
-
-    {panelContainers.map((c) => (
-      <SortableContainer
-        key={c.id}
-        container={c}
-        panelId={panel.id}
-        instancesById={instancesById}
-        addInstanceToContainer={addInstanceToContainer}
-        isDraggingContainer={isContainerDrag}
-        isInstanceDrag={isInstanceDrag}
-        overData={overData}
-      />
-    ))}
-
-    {panelContainers.length === 0 && !isContainerDrag && (
-      <div className="mt-3 opacity-70 text-[13px]">
-        Create a container to start.
-      </div>
-    )}
-  </ListWrapper>
-</SortableContext>
-
-
+              {panelContainers.length === 0 && !isContainerDrag && (
+                <div className="mt-3 opacity-70 text-[13px]">
+                  Create a container to start.
+                </div>
+              )}
+            </ListWrapper>
+          </SortableContext>
 
           <div style={{ height: 20, zIndex: 1 }} />
         </div>
@@ -481,6 +547,9 @@ export default React.memo(Panel, (prev, next) => {
   if (prev.panel?.width !== next.panel?.width) return false;
   if (prev.panel?.height !== next.panel?.height) return false;
 
+  // ✅ layout changes must re-render (ListWrapper props, toolbar UI)
+  if (prev.panel?.layout !== next.panel?.layout) return false;
+
   // Container ordering in this panel must re-render (SortableContext depends on it)
   if (!sameIdList(prev.panel?.containers, next.panel?.containers)) return false;
 
@@ -495,6 +564,7 @@ export default React.memo(Panel, (prev, next) => {
   // These affect render output
   if (prev.cols !== next.cols) return false;
   if (prev.rows !== next.rows) return false;
+
   // Instances map changes must re-render so lists show new items immediately
   if (prev.instancesById !== next.instancesById) return false;
 

@@ -5,6 +5,7 @@ const InstanceSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, index: true, unique: true },
     label: { type: String, required: true, trim: true },
+    originalContainerId: { type: String },
     userId: { type: String, required: true }, // ✅ move here
     // ...any other instance props you want persisted
   },

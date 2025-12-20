@@ -1,5 +1,5 @@
 // SortableContainer.jsx
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -8,24 +8,64 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
-import SortableInstance from "./SortableInstance";
 
-import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
+import SortableInstance from "./SortableInstance";
+import { Settings, PlusSquare, GripVertical } from "lucide-react";
+import ButtonPopover from "./ui/ButtonPopover";
+import ContainerForm from "./ui/ContainerForm";
+
+import { emit } from "./socket";
+import { updateContainerAction, deleteContainerAction } from "./state/actions";
+
+/**
+ * Uses your action creators + socket emits.
+ * Needs `dispatch` passed in.
+ */
 function SortableContainerInner({
   container,
   panelId,
 
-  // ✅ injected (no context subscriptions)
+  // ✅ injected data
   instancesById,
   addInstanceToContainer,
   isDraggingContainer,
-  overData, // ✅ add
+  overData,
   isInstanceDrag,
+
+  // ✅ provide dispatch from parent
+  dispatch,
 }) {
-  const onAdd = useCallback(() => addInstanceToContainer(container.id), [
-    addInstanceToContainer,
-    container.id,
-  ]);
+  const onAdd = useCallback(
+    () => addInstanceToContainer(container.id),
+    [addInstanceToContainer, container.id]
+  );
+
+  // ✅ local draft for popover
+  const [draft, setDraft] = useState(() => ({ label: container.label ?? "" }));
+
+  // keep draft in sync if container label changes from server
+  useEffect(() => {
+    setDraft({ label: container.label ?? "" });
+  }, [container.id, container.label]);
+
+  const commitLabel = () => {
+    const next = (draft?.label ?? "").trim();
+    if (!next) return;
+
+    // ✅ optimistic reducer update
+    dispatch?.(updateContainerAction({ id: container.id, label: next }));
+
+    // ✅ server update
+    emit("update_container", { container: { id: container.id, label: next } });
+  };
+
+  const deleteMe = () => {
+    // ✅ optimistic reducer update
+    dispatch?.(deleteContainerAction(container.id));
+
+    // ✅ server delete (server should cascade remove from panel containers + delete instances if enabled)
+    emit("delete_container", { containerId: container.id });
+  };
 
   const {
     setNodeRef,
@@ -52,7 +92,7 @@ function SortableContainerInner({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0 : 1,
-    pointerEvents: isDragging ? "none" : "auto"
+    pointerEvents: isDragging ? "none" : "auto",
   };
 
   const items = useMemo(() => {
@@ -94,9 +134,6 @@ function SortableContainerInner({
     },
   });
 
-  const EDGE = 30;
-  const HIT_PAD = 20;
-  const INSET_X = 10; // match your real padding
   const DEBUG_HITBOXES = false;
   const roleStr = typeof overData?.role === "string" ? overData.role : "";
   const isOverThisContainer =
@@ -104,11 +141,10 @@ function SortableContainerInner({
     (roleStr === "instance" && overData?.containerId === container.id);
 
   const highlightDrop = isInstanceDrag && isOverThisContainer;
-  // inside SortableContainerInner()
 
-  const handleDragProps = isInstanceDrag
-    ? {} // ✅ do NOT attach activators during instance drag
-    : { ...attributes, ...listeners };
+  // ✅ IMPORTANT: during instance drag, do NOT attach container drag handle listeners
+  const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
+
   return (
     <div
       ref={setNodeRef}
@@ -116,19 +152,16 @@ function SortableContainerInner({
         ...style,
         display: "flex",
         flexDirection: "column",
+        height: "100%",
+        minHeight: 0,
         overflow: "visible",
-
-        // ✅ LAYOUT-SAFE HIGHLIGHT (does not change element rect)
         outline: highlightDrop
           ? "2px solid rgba(50,150,255,0.9)"
           : "0px solid transparent",
         outlineOffset: 0,
-
-
         borderRadius: 10,
       }}
       className="container-shell bg-background2 rounded-md border border-border shadow-inner"
-
     >
       {/* HEADER */}
       <div
@@ -138,7 +171,8 @@ function SortableContainerInner({
           flex: "0 0 auto",
           display: "flex",
           alignItems: "end",
-          pointerEvents: (highlightDrop ? "none" : "auto"),
+          pointerEvents: highlightDrop ? "none" : "auto",
+          gap: 6,
         }}
       >
         <div
@@ -149,27 +183,35 @@ function SortableContainerInner({
           <GripVertical className="h-4 w-4 text-white" />
         </div>
 
-        <div className="font-mono text-[10px] sm:text-xs"
-          style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}>
+        <div
+          className="font-mono text-[10px] sm:text-xs"
+          style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}
+        >
           {container.label}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto"
-          onClick={onAdd}
-        >
+        {/* ✅ container popover */}
+        <div className="flex ml-auto">
+          <ButtonPopover label={<Settings className="h-4 w-4" />}>
+            <ContainerForm
+              value={draft}
+              onChange={setDraft}
+              onCommitLabel={commitLabel}
+              onDeleteContainer={deleteMe}
+              containerId={container.id}
+            />
+          </ButtonPopover>
 
-          <PlusSquare className="h-4 w-4 mr-[1px]" /> Instance
-        </Button>
-
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={onAdd}>
+            <PlusSquare className="h-4 w-4 mr-[1px]" />
+          </Button>
+        </div>
       </div>
 
       {/* BODY */}
       <div
         className="container-body"
-        style={{ flex: "1", overflow: "visible", padding: 5, display: "flex" }}
+        style={{ flex: "1", overflow: "visible", display: "flex" }}
       >
         <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
           {/* TOP hitbox */}
@@ -186,7 +228,6 @@ function SortableContainerInner({
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
               zIndex: 2,
               maxWidth: "unset",
-
             }}
           />
 
@@ -204,7 +245,7 @@ function SortableContainerInner({
               zIndex: 2,
               borderRadius: 10,
               maxWidth: "unset",
-              minHeight: "50px"
+              minHeight: "50px",
             }}
           />
 
@@ -227,8 +268,6 @@ function SortableContainerInner({
                 />
               ))}
             </SortableContext>
-
-
           </div>
 
           {/* BOTTOM hitbox */}
@@ -243,10 +282,8 @@ function SortableContainerInner({
               zIndex: 2,
               pointerEvents: "none",
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-
               borderRadius: 10,
-              maxWidth: "unset"
-
+              maxWidth: "unset",
             }}
           />
         </div>
@@ -275,6 +312,9 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   const pc = prev.overData?.containerId ?? null;
   const nc = next.overData?.containerId ?? null;
   if (pc !== nc) return false;
+
+  // dispatch prop should be stable (from useReducer)
+  if (prev.dispatch !== next.dispatch) return false;
 
   return true;
 });
