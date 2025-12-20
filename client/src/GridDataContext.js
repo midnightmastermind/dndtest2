@@ -1,18 +1,22 @@
+// GridDataContext.js
 import { createContext } from "react";
 
 export const GridDataContext = createContext({
-  // drag state
-  activeId: null,
-  activeSize: null,
+  state: {
+    userId: null,
+    gridId: null,
+    grid: null,
+    panels: [],
+    containers: [],
+    instances: [],
+    activeId: null,
+    activeSize: null,
+    softTick: 0,
+  },
 
-  // debug
-  debugEvent: null,
-
-  // data state
-  containers: [],
+  // used to render draft ordering during drag
   containersRender: [],
-  instances: [],
 
-  // rerender tick for draft ref
-  softTick: 0,
+  // local re-render tick during drag (App state)
+  dragTick: 0,
 });

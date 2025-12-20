@@ -1,11 +1,7 @@
 // SortableContainer.jsx
 import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 
@@ -17,22 +13,19 @@ import ContainerForm from "./ui/ContainerForm";
 import { emit } from "./socket";
 import { updateContainerAction, deleteContainerAction } from "./state/actions";
 
-/**
- * Uses your action creators + socket emits.
- * Needs `dispatch` passed in.
- */
 function SortableContainerInner({
   container,
   panelId,
 
-  // ✅ injected data
   instancesById,
   addInstanceToContainer,
   isDraggingContainer,
-  overData,
   isInstanceDrag,
 
-  // ✅ provide dispatch from parent
+  // ✅ from parent
+  isHot = false,
+  hotRole = "",
+
   dispatch,
 }) {
   const onAdd = useCallback(
@@ -40,10 +33,8 @@ function SortableContainerInner({
     [addInstanceToContainer, container.id]
   );
 
-  // ✅ local draft for popover
   const [draft, setDraft] = useState(() => ({ label: container.label ?? "" }));
 
-  // keep draft in sync if container label changes from server
   useEffect(() => {
     setDraft({ label: container.label ?? "" });
   }, [container.id, container.label]);
@@ -51,30 +42,16 @@ function SortableContainerInner({
   const commitLabel = () => {
     const next = (draft?.label ?? "").trim();
     if (!next) return;
-
-    // ✅ optimistic reducer update
     dispatch?.(updateContainerAction({ id: container.id, label: next }));
-
-    // ✅ server update
     emit("update_container", { container: { id: container.id, label: next } });
   };
 
   const deleteMe = () => {
-    // ✅ optimistic reducer update
     dispatch?.(deleteContainerAction(container.id));
-
-    // ✅ server delete (server should cascade remove from panel containers + delete instances if enabled)
     emit("delete_container", { containerId: container.id });
   };
 
-  const {
-    setNodeRef,
-    attributes,
-    listeners,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: container.id,
     data: {
       role: "container",
@@ -101,17 +78,7 @@ function SortableContainerInner({
 
   const itemIds = useMemo(() => items.map((x) => x.id), [items]);
 
-  const top = useDroppable({
-    id: `top:${container.id}`,
-    disabled: isDraggingContainer,
-    data: {
-      role: "container:top",
-      containerId: container.id,
-      label: container.label,
-      panelId,
-    },
-  });
-
+  // ✅ SINGLE droppable for entire container dropzone (top+list+bottom combined)
   const list = useDroppable({
     id: `list:${container.id}`,
     disabled: isDraggingContainer,
@@ -123,26 +90,10 @@ function SortableContainerInner({
     },
   });
 
-  const bottom = useDroppable({
-    id: `bottom:${container.id}`,
-    disabled: isDraggingContainer,
-    data: {
-      role: "container:bottom",
-      containerId: container.id,
-      label: container.label,
-      panelId,
-    },
-  });
-
   const DEBUG_HITBOXES = false;
-  const roleStr = typeof overData?.role === "string" ? overData.role : "";
-  const isOverThisContainer =
-    (roleStr.startsWith("container:") && overData?.containerId === container.id) ||
-    (roleStr === "instance" && overData?.containerId === container.id);
 
-  const highlightDrop = isInstanceDrag && isOverThisContainer;
+  const highlightDrop = isInstanceDrag && isHot;
 
-  // ✅ IMPORTANT: during instance drag, do NOT attach container drag handle listeners
   const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
 
   return (
@@ -155,9 +106,7 @@ function SortableContainerInner({
         height: "100%",
         minHeight: 0,
         overflow: "visible",
-        outline: highlightDrop
-          ? "2px solid rgba(50,150,255,0.9)"
-          : "0px solid transparent",
+        outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "0px solid transparent",
         outlineOffset: 0,
         borderRadius: 10,
       }}
@@ -183,15 +132,11 @@ function SortableContainerInner({
           <GripVertical className="h-4 w-4 text-white" />
         </div>
 
-        <div
-          className="font-mono text-[10px] sm:text-xs"
-          style={{ fontWeight: 500, padding: "0px 0px 0px 3px" }}
-        >
+        <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
           {container.label}
         </div>
 
-        {/* ✅ container popover */}
-        <div className="flex ml-auto">
+        <div style={{display: "none"}} className="flex ml-auto">
           <ButtonPopover label={<Settings className="h-4 w-4" />}>
             <ContainerForm
               value={draft}
@@ -209,83 +154,38 @@ function SortableContainerInner({
       </div>
 
       {/* BODY */}
-      <div
-        className="container-body"
-        style={{ flex: "1", overflow: "visible", display: "flex" }}
-      >
+      <div className="container-body" style={{ flex: 1, overflow: "visible", display: "flex" }}>
         <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
-          {/* TOP hitbox */}
-          <div
-            ref={top.setNodeRef}
-            style={{
-              position: "absolute",
-              left: -13,
-              right: -13,
-              top: -45,
-              height: 50,
-              pointerEvents: "none",
-              borderRadius: 10,
-              background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              zIndex: 2,
-              maxWidth: "unset",
-            }}
-          />
-
-          {/* LIST hitbox */}
+          {/* ✅ ONE hitbox covers old TOP + LIST + BOTTOM */}
           <div
             ref={list.setNodeRef}
             style={{
               position: "absolute",
-              left: -13,
-              right: -13,
-              top: 5,
-              bottom: 5,
+              left: -15,
+              right: -15,
+              top: -45,     // was top hitbox
+              bottom: -10,  // was bottom hitbox
               pointerEvents: "none",
+              borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
               zIndex: 2,
-              borderRadius: 10,
               maxWidth: "unset",
-              minHeight: "50px",
+              minHeight: "60px",
             }}
           />
 
           {/* VISIBLE LIST */}
-          <div
-            className="container-list instance-pocket"
-            style={{ position: "relative", overflow: "visible" }}
-          >
+          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible" }}>
             <SortableContext
               id={`container-sortable:${container.id}`}
               items={itemIds}
               strategy={verticalListSortingStrategy}
             >
               {items.map((inst) => (
-                <SortableInstance
-                  key={inst.id}
-                  instance={inst}
-                  containerId={container.id}
-                  panelId={panelId}
-                />
+                <SortableInstance key={inst.id} instance={inst} containerId={container.id} panelId={panelId} />
               ))}
             </SortableContext>
           </div>
-
-          {/* BOTTOM hitbox */}
-          <div
-            ref={bottom.setNodeRef}
-            style={{
-              position: "absolute",
-              left: -15,
-              right: -15,
-              bottom: -10,
-              height: 15,
-              zIndex: 2,
-              pointerEvents: "none",
-              background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              borderRadius: 10,
-              maxWidth: "unset",
-            }}
-          />
         </div>
       </div>
     </div>
@@ -305,16 +205,9 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   if (prev.isDraggingContainer !== next.isDraggingContainer) return false;
   if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
 
-  const pr = prev.overData?.role ?? null;
-  const nr = next.overData?.role ?? null;
-  if (pr !== nr) return false;
+  if (prev.isHot !== next.isHot) return false;
+  if (prev.hotRole !== next.hotRole) return false;
 
-  const pc = prev.overData?.containerId ?? null;
-  const nc = next.overData?.containerId ?? null;
-  if (pc !== nc) return false;
-
-  // dispatch prop should be stable (from useReducer)
   if (prev.dispatch !== next.dispatch) return false;
-
   return true;
 });

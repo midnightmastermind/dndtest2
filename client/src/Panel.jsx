@@ -1,26 +1,18 @@
 // Panel.jsx — MERGED: persist layout on panel, derive from panel.layout, debounce backend writes
-import React, { useRef, useMemo, useState, useCallback } from "react";
+import React, { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
-import { ActionTypes } from "./state/actions";
 import { emit } from "./socket";
-import {
-  SortableContext,
-  rectSortingStrategy,
-  horizontalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
+
 import { Button } from "./components/ui/button";
 import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
-import { ListWrapper } from "@/components/ui/list-wrapper";
+import { ListWrapper } from "./components/ui/list-wrapper";
+
 import { updatePanelAction, deletePanelAction } from "./state/actions";
-import {
-  Settings,
-  Maximize,
-  Minimize,
-  PlusSquare,
-  GripVertical,
-} from "lucide-react";
+
+import { Settings, Maximize, Minimize, PlusSquare, GripVertical } from "lucide-react";
 
 // ----------------------------
 // memo helpers
@@ -79,7 +71,6 @@ function getDefaultLayout() {
     minHeightPx: 0,
     maxHeightPx: 0,
 
-    // if you're using lock in LayoutForm
     lock: {
       enabled: false,
       containersDrag: true,
@@ -92,8 +83,7 @@ function getDefaultLayout() {
 
 function mergeLayout(panelLayout) {
   const base = getDefaultLayout();
-  const next =
-    panelLayout && typeof panelLayout === "object" ? panelLayout : {};
+  const next = panelLayout && typeof panelLayout === "object" ? panelLayout : {};
 
   return {
     ...base,
@@ -120,8 +110,6 @@ function Panel({
   gridRef,
   cols,
   rows,
-  activeId,
-  gridActive,
 
   // ✅ injected (no context subscriptions)
   overData,
@@ -156,12 +144,9 @@ function Panel({
   const isOverThisPanel = (() => {
     if (!overData) return false;
 
-    if (overData.role?.includes?.("instance") && overData.panelId === panel.id)
-      return true;
-    if (overData.role?.includes?.("panel") && overData.panelId === panel.id)
-      return true;
-    if (overData.role?.includes?.("container") && overData.panelId === panel.id)
-      return true;
+    if (overData.role?.includes?.("instance") && overData.panelId === panel.id) return true;
+    if (overData.role?.includes?.("panel") && overData.panelId === panel.id) return true;
+    if (overData.role?.includes?.("container") && overData.panelId === panel.id) return true;
 
     const roleStr = typeof overData.role === "string" ? overData.role : "";
     const isContainerZone = roleStr.startsWith("container:");
@@ -190,12 +175,7 @@ function Panel({
     [panel.id, panel.col, panel.row, panel.width, panel.height]
   );
 
-  const {
-    setNodeRef: setPanelDragRef,
-    attributes,
-    listeners,
-    setActivatorNodeRef,
-  } = useDraggable({
+  const { setNodeRef: setPanelDragRef, attributes, listeners } = useDraggable({
     id: panel.id,
     data,
     disabled: fullscreen,
@@ -223,23 +203,31 @@ function Panel({
   }, [panel?.containers, containersById]);
 
   // ----------------------------------------------------------
-  // ✅ Persist helper
+  // ✅ Persist helpers (aligned with actions.js payload shapes)
   // ----------------------------------------------------------
-const updatePanelFinal = (updated) => {
-  dispatch(updatePanelAction(updated)); // payload: { panel }
-  emit("update_panel", { panel: updated, gridId: updated.gridId });
-};
+  const updatePanelFinal = useCallback(
+    (updatedPanel) => {
+      // reducer expects payload: { panel }
+      dispatch(updatePanelAction(updatedPanel));
 
-const deletePanelFinal = (panelId) => {
-  if (!panelId) return;
+      // backend
+      emit("update_panel", { panel: updatedPanel, gridId: updatedPanel.gridId });
+    },
+    [dispatch]
+  );
 
-  // optimistic
-  dispatch(deletePanelAction(panelId)); // payload: { panelId } :contentReference[oaicite:5]{index=5}
+  const deletePanelFinal = useCallback(
+    (panelId) => {
+      if (!panelId) return;
 
-  // backend
-  emit("delete_panel", { panelId });
-};
+      // reducer expects payload: { panelId }
+      dispatch(deletePanelAction(panelId));
 
+      // backend
+      emit("delete_panel", { panelId });
+    },
+    [dispatch]
+  );
 
   // ----------------------------------------------------------
   // ✅ Layout: derive from panel.layout + debounced backend write
@@ -247,21 +235,23 @@ const deletePanelFinal = (panelId) => {
   const layout = useMemo(() => mergeLayout(panel?.layout), [panel?.layout]);
   const layoutSaveTimer = useRef(null);
 
+  useEffect(() => {
+    return () => window.clearTimeout(layoutSaveTimer.current);
+  }, []);
+
   const setLayout = useCallback(
     (nextLayout) => {
       const merged = mergeLayout(nextLayout);
+      const nextPanel = { ...panel, layout: merged };
 
-      // optimistic UI update immediately (so ListWrapper updates live)
-      dispatch({
-        type: ActionTypes.UPDATE_PANEL,
-        payload: { ...panel, layout: merged },
-      });
+      // ✅ optimistic UI update immediately (correct payload shape)
+      dispatch(updatePanelAction(nextPanel));
 
-      // debounce backend/socket write (sliders, rapid changes)
+      // ✅ debounce backend/socket write (sliders, rapid changes)
       window.clearTimeout(layoutSaveTimer.current);
       layoutSaveTimer.current = window.setTimeout(() => {
         emit("update_panel", {
-          panel: { ...panel, layout: merged },
+          panel: nextPanel,
           gridId: panel.gridId,
         });
       }, 150);
@@ -382,7 +372,6 @@ const deletePanelFinal = (panelId) => {
 
   const panelHandleProps = isChildDrag ? {} : { ...attributes, ...listeners };
 
-  // ✅ fix: single outline value (don't overwrite highlight with resize)
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
@@ -391,6 +380,8 @@ const deletePanelFinal = (panelId) => {
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
+const hotId = overData?.containerId ?? null;
+const hotRole = typeof overData?.role === "string" ? overData.role : "";
   return (
     <div
       className="panel-card bg-background rounded-lg border border-border shadow-xl"
@@ -437,8 +428,7 @@ const deletePanelFinal = (panelId) => {
 
           <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
             <ButtonPopover label={<Settings className="h-4 w-4" />}>
-              {/* ✅ now edits persist to panel.layout */}
-              <LayoutForm value={layout} onChange={setLayout} onDeletePanel={deletePanelFinal}/>
+              <LayoutForm value={layout} onChange={setLayout} onDeletePanel={deletePanelFinal} />
             </ButtonPopover>
 
             <Button size="sm" onClick={() => addContainerToPanel(panel.id)}>
@@ -446,11 +436,7 @@ const deletePanelFinal = (panelId) => {
             </Button>
 
             <Button variant="ghost" size="sm" onClick={toggleFullscreen}>
-              {fullscreen ? (
-                <Minimize className="h-4 w-4" />
-              ) : (
-                <Maximize className="h-4 w-4" />
-              )}
+              {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
             </Button>
           </div>
         </div>
@@ -468,22 +454,13 @@ const deletePanelFinal = (panelId) => {
         >
           <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
-          <SortableContext
-            items={panelContainerIds}
-            strategy={rectSortingStrategy}
-            disabled={isInstanceDrag}
-          >
+          <SortableContext items={panelContainerIds} strategy={rectSortingStrategy} disabled={isInstanceDrag}>
             <ListWrapper
               className="h-full w-full"
               display={layout.display}
               flow={layout.flow}
               wrap={layout.display === "flex" ? (layout.wrap ?? "wrap") : undefined}
-              // ✅ support columns mode too
-              columns={
-                layout.display === "grid" || layout.display === "columns"
-                  ? layout.columns
-                  : 0
-              }
+              columns={layout.display === "grid" || layout.display === "columns" ? layout.columns : 0}
               rows={layout.display === "grid" ? layout.rows : 0}
               alignContent={layout.alignContent}
               alignItems={layout.alignItems}
@@ -496,7 +473,6 @@ const deletePanelFinal = (panelId) => {
               scrollHideDelay={layout.scrollHideDelay}
               scrollX={layout.scrollX}
               scrollY={layout.scrollY}
-              // ✅ single width/height system used for grid tracks + flex children
               widthMode={layout.widthMode}
               fixedWidth={layout.fixedWidth}
               minWidthPx={layout.minWidthPx}
@@ -513,17 +489,16 @@ const deletePanelFinal = (panelId) => {
                   container={c}
                   panelId={panel.id}
                   instancesById={instancesById}
-                  addInstanceToContainer={addInstanceToContainer}
+                 isHot={hotId === c.id}
+  hotRole={hotRole} addInstanceToContainer={addInstanceToContainer}
                   isDraggingContainer={isContainerDrag}
                   isInstanceDrag={isInstanceDrag}
-                  overData={overData}
+                  
                 />
               ))}
 
               {panelContainers.length === 0 && !isContainerDrag && (
-                <div className="mt-3 opacity-70 text-[13px]">
-                  Create a container to start.
-                </div>
+                <div className="mt-3 opacity-70 text-[13px]">Create a container to start.</div>
               )}
             </ListWrapper>
           </SortableContext>
@@ -538,34 +513,25 @@ const deletePanelFinal = (panelId) => {
 }
 
 export default React.memo(Panel, (prev, next) => {
-  // Panel identity
   if (prev.panel?.id !== next.panel?.id) return false;
 
-  // Position/size changes must re-render
   if (prev.panel?.row !== next.panel?.row) return false;
   if (prev.panel?.col !== next.panel?.col) return false;
   if (prev.panel?.width !== next.panel?.width) return false;
   if (prev.panel?.height !== next.panel?.height) return false;
 
-  // ✅ layout changes must re-render (ListWrapper props, toolbar UI)
   if (prev.panel?.layout !== next.panel?.layout) return false;
 
-  // Container ordering in this panel must re-render (SortableContext depends on it)
   if (!sameIdList(prev.panel?.containers, next.panel?.containers)) return false;
 
-  // Drag state that affects header + highlight
-  if (prev.activeId !== next.activeId) return false;
   if (prev.isContainerDrag !== next.isContainerDrag) return false;
   if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
 
-  // Hover/highlight routing (minimal key)
   if (pickOverKey(prev.overData) !== pickOverKey(next.overData)) return false;
 
-  // These affect render output
   if (prev.cols !== next.cols) return false;
   if (prev.rows !== next.rows) return false;
 
-  // Instances map changes must re-render so lists show new items immediately
   if (prev.instancesById !== next.instancesById) return false;
 
   return true;

@@ -104,22 +104,21 @@ export default function Toolbar({
 
 
           <div style={{ minWidth: 130 }}>
-            <FormInput
-              schema={{
-                type: "select",
-                className:"flex content-end",
-                key: "gridId",
-                label: "Grid",
-                options: gridOptions,
-                placeholder: "Select grid…",
-                onValueChange: (val) => {
-                  // mimic your old onGridChange signature
-                  onGridChange?.({ target: { value: val } });
-                },
-              }}
-              value={{ gridId: gridId || "" }}
-              onChange={() => { }}
-            />
+          <FormInput
+  schema={{
+    type: "select",
+    className: "flex content-end",
+    key: "gridId",
+    label: "Grid",
+    options: gridOptions,
+    placeholder: "Select grid…",
+  }}
+  value={{ gridId: gridId || "" }}
+  onChange={(next) => {
+    const val = next?.gridId ?? "";
+    onGridChange?.({ target: { value: val } });
+  }}
+/>
           </div>
           <Button
             size="sm"

@@ -12,7 +12,7 @@ import {
   createInstanceInContainerAction,
 } from "./state/actions";
   import { deleteGridAction } from "./state/actions";
-
+import { ActionTypes } from "./state/actions";
 import Grid from "./Grid";
 import LoginScreen from "./LoginScreen";
 
@@ -61,7 +61,6 @@ export default function App() {
     state,
     dispatch,
     socket,
-    pointerRef: livePointerRef,
     scheduleSoftTick,
   });
 
@@ -131,7 +130,9 @@ export default function App() {
     const newGridId = e.target.value;
     if (!newGridId || newGridId === state.gridId) return;
 
+dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
     localStorage.setItem("moduli-gridId", newGridId);
+    
     socket.emit("request_full_state", { gridId: newGridId });
   };
 

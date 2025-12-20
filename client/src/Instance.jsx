@@ -66,7 +66,7 @@ function InstanceInner({
       {...(!overlay ? dragListeners : {})}
     >
       {/* ✅ settings popover next to label */}
-      <ButtonPopover label={<Settings className="h-4 w-4" />}>
+      <ButtonPopover style={{display: "none"}} label={<Settings className="h-4 w-4" />}>
         <InstanceForm
           value={draft}
           onChange={setDraft}

@@ -1,3 +1,4 @@
+// helpers/useDndReorderCoordinator.js
 import { useCallback, useMemo, useRef, useEffect } from "react";
 import {
   setActiveIdAction,
@@ -14,7 +15,6 @@ const ACCEPTS = {
 };
 
 // ---------- utilities ----------
-
 function arrayMove(arr, from, to) {
   const copy = [...arr];
   const [item] = copy.splice(from, 1);
@@ -112,11 +112,19 @@ function getOverParent(over, activeRole) {
     d.role.startsWith("container:")
   ) {
     // insert relative to the container we’re hovering
-    return { parentRole: "panel", parentId: d.panelId, overChildId: d.containerId };
+    return {
+      parentRole: "panel",
+      parentId: d.panelId,
+      overChildId: d.containerId,
+    };
   }
 
   // original behavior:
-  if (d?.containerId && typeof d?.role === "string" && d.role.startsWith("container:")) {
+  if (
+    d?.containerId &&
+    typeof d?.role === "string" &&
+    d.role.startsWith("container:")
+  ) {
     return { parentRole: "container", parentId: d.containerId };
   }
 
@@ -156,10 +164,10 @@ export function useDndReorderCoordinator({
   // ✅ track which panels were touched, so dragEnd persists once
   const touchedPanelsRef = useRef(new Set());
 
-  // ✅ NEW: keep latest panel objects here so dragEnd doesn’t read stale state.panels
+  // ✅ keep latest panel objects here so dragEnd doesn’t read stale state.panels
   const touchedPanelsMapRef = useRef(new Map()); // panelId -> latest panel object
 
-  // ✅ hover intent threshold ref (MUST be at top-level, not inside callbacks)
+  // ✅ hover intent threshold ref (kept for future, not used yet)
   const hoverIntentRef = useRef({ key: null, t0: 0 });
 
   // ✅ KEEP this (you asked)
@@ -200,7 +208,9 @@ export function useDndReorderCoordinator({
       dispatch(setActiveIdAction(event.active.id));
 
       const rect = event.active.rect?.current?.initial;
-      if (rect) dispatch(setActiveSizeAction({ width: rect.width, height: rect.height }));
+      if (rect) {
+        dispatch(setActiveSizeAction({ width: rect.width, height: rect.height }));
+      }
 
       containersDraftRef.current = deepCloneContainers(state.containers);
 
@@ -276,7 +286,6 @@ export function useDndReorderCoordinator({
         const fromIndex = (fromContainer.items || []).indexOf(instanceId);
         if (fromIndex === -1) return;
 
-
         // ======================================================
         // ✅ compute toIndex (supports container:top / container:list / container:bottom)
         // ======================================================
@@ -292,6 +301,7 @@ export function useDndReorderCoordinator({
 
           const activeRect = active.rect?.current?.translated;
           const overRect = over.rect;
+
           const isBelow =
             activeRect && overRect
               ? activeRect.top > overRect.top + overRect.height / 2
@@ -400,9 +410,7 @@ export function useDndReorderCoordinator({
         const toPanel = findPanelById(overInfo.parentId, state.panels || []);
         if (!fromPanel || !toPanel) return;
 
-        if (fromPanel.id === toPanel.id && !overInfo.overChildId) {
-          return;
-        }
+        if (fromPanel.id === toPanel.id && !overInfo.overChildId) return;
 
         let toIndex = null;
         if (overInfo.overChildId) {
@@ -410,6 +418,7 @@ export function useDndReorderCoordinator({
           if (idx >= 0) toIndex = idx;
         }
 
+        // ✅ de-dupe spam
         const lastM = lastContainerMoveRef.current;
         if (
           lastM.fromPanelId === fromPanel.id &&
@@ -426,7 +435,7 @@ export function useDndReorderCoordinator({
           overChildId: overInfo.overChildId ?? null,
         };
 
-        // same-panel reorder
+        // ✅ same-panel reorder
         if (fromPanel.id === toPanel.id && overInfo.overChildId) {
           const ids = fromPanel.containers || [];
           const fromIndex = ids.indexOf(activeContainerId);
@@ -435,8 +444,8 @@ export function useDndReorderCoordinator({
           if (fromIndex === hoverIndex) return;
 
           const nextIds = arrayMove(ids, fromIndex, hoverIndex);
-
           const updated = { ...fromPanel, containers: nextIds };
+
           dispatch(updatePanelAction(updated));
 
           touchedPanelsRef.current.add(fromPanel.id);
@@ -446,7 +455,7 @@ export function useDndReorderCoordinator({
           return;
         }
 
-        // cross-panel move
+        // ✅ cross-panel move
         const moved = moveChildAcrossParents({
           childId: activeContainerId,
           fromParent: fromPanel,
@@ -474,7 +483,6 @@ export function useDndReorderCoordinator({
 
   const handleDragEnd = useCallback(
     (event) => {
-
       const { active, over } = event;
       const activeRole = active?.data?.current?.role ?? null;
 
@@ -493,7 +501,9 @@ export function useDndReorderCoordinator({
         const touched = Array.from(touchedPanelsRef.current || []);
         for (const panelId of touched) {
           const panel = touchedPanelsMapRef.current.get(panelId);
-          if (panel) socket?.emit("update_panel", { panel, gridId: panel.gridId });
+          if (panel) {
+            socket?.emit("update_panel", { panel, gridId: panel.gridId });
+          }
         }
 
         touchedPanelsRef.current = new Set();

@@ -17,7 +17,7 @@ import Panel from "./Panel";
 import PanelClone from "./PanelClone";
 import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
-import MoreVerticalIcon from "@atlaskit/icon/glyph/more-vertical";
+import { GripVertical } from "lucide-react";
 
 /* -------------------------------------------
    ✅ Overlay clone for CONTAINER drags
@@ -26,10 +26,13 @@ function ContainerClone({ container }) {
   if (!container) return null;
 
   return (
-    <div className="container-shell" style={{ pointerEvents: "none", opacity: 0.95 }}>
+    <div
+      className="container-shell"
+      style={{ pointerEvents: "none", opacity: 0.95 }}
+    >
       <div className="container-header">
         <div style={{ paddingLeft: 6 }}>
-          <MoreVerticalIcon size="small" primaryColor="#9AA0A6" />
+          <GripVertical className="h-4 w-4 text-white" />
         </div>
         <div style={{ fontWeight: 600, padding: "0px 10px" }}>
           {container.label ?? "Container"}
@@ -37,7 +40,14 @@ function ContainerClone({ container }) {
       </div>
 
       <div className="container-list" style={{ minHeight: 60 }}>
-        <div style={{ fontSize: 12, opacity: 0.6, fontStyle: "italic", padding: 8 }}>
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.6,
+            fontStyle: "italic",
+            padding: 8,
+          }}
+        >
           Dragging…
         </div>
       </div>
@@ -65,9 +75,11 @@ const CellDroppable = React.memo(function CellDroppable({
     <div
       ref={setNodeRef}
       data-id={`cell-${r}-${c}`}
-      className={["grid-cell", dark ? "is-dark" : "is-light", highlight ? "is-highlight" : ""].join(
-        " "
-      )}
+      className={[
+        "grid-cell",
+        dark ? "is-dark" : "is-light",
+        highlight ? "is-highlight" : "",
+      ].join(" ")}
       style={{ gridRow: r + 1, gridColumn: c + 1 }}
     />
   );
@@ -134,7 +146,13 @@ function GridCanvas({
               disabled={false}
             />
           ) : (
-            <CellStatic key={cellId} r={r} c={c} dark={dark} highlight={highlight} />
+            <CellStatic
+              key={cellId}
+              r={r}
+              c={c}
+              dark={dark}
+              highlight={highlight}
+            />
           )
         );
       }
@@ -241,10 +259,14 @@ function GridInner({ components }) {
   } = useContext(GridActionsContext);
 
   // ✅ DEBUG: flip on/off quickly
-  const DEBUG_DND = true;
+  const DEBUG_DND = false;
 
   // ✅ throttle noisy logs to ~10/sec
   const debugRafRef = useRef({ t: 0 });
+
+  // ✅ Cache hovered panel id (so collisionDetection doesn't call elementsFromPoint every call)
+  const hoveredPanelIdRef = useRef(null);
+
   function dlog(label, payload) {
     if (!DEBUG_DND) return;
     const now = performance.now();
@@ -287,28 +309,7 @@ function GridInner({ components }) {
 
   const [panelOverCellId, setPanelOverCellId] = useState(null);
 
-  // ✅ Track pointer globally into the SAME ref used by coordinator
-  useEffect(() => {
-    const onMove = (e) => {
-      if (e.touches?.[0]) {
-        pointerRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      } else {
-        pointerRef.current = { x: e.clientX, y: e.clientY };
-      }
-    };
-
-    window.addEventListener("mousemove", onMove, { passive: true });
-    window.addEventListener("touchmove", onMove, { passive: true });
-
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("touchmove", onMove);
-    };
-  }, [pointerRef]);
-
-  // ------------------------
-  // sizes
-  // ------------------------
+  // ✅ sizes
   const ensureSizes = (arr, count) => {
     if (!Array.isArray(arr) || arr.length === 0) return Array(count).fill(1);
     if (arr.length === count) return arr;
@@ -408,10 +409,12 @@ function GridInner({ components }) {
   }
 
   const getStartClientX = (event) =>
-    event?.activatorEvent?.clientX ?? event?.activatorEvent?.touches?.[0]?.clientX;
+    event?.activatorEvent?.clientX ??
+    event?.activatorEvent?.touches?.[0]?.clientX;
 
   const getStartClientY = (event) =>
-    event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
+    event?.activatorEvent?.clientY ??
+    event?.activatorEvent?.touches?.[0]?.clientY;
 
   const containersById = useMemo(() => {
     const m = Object.create(null);
@@ -429,8 +432,8 @@ function GridInner({ components }) {
       const top10 = stack.slice(0, 10).map((el) => ({
         tag: el.tagName,
         cls: el.className,
-        panel: el.closest?.("[data-panel-id]")?.getAttribute("data-panel-id") || null,
-        // ✅ dnd-kit attributes
+        panel:
+          el.closest?.("[data-panel-id]")?.getAttribute("data-panel-id") || null,
         droppable: el.getAttribute?.("data-dndkit-droppable-id") || null,
         draggable: el.getAttribute?.("data-dndkit-draggable-id") || null,
       }));
@@ -438,81 +441,94 @@ function GridInner({ components }) {
     }
 
     for (const el of stack) {
-      if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay")) continue;
+      if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay"))
+        continue;
       const panelEl = el.closest?.("[data-panel-id]");
       if (panelEl) {
-        return panelEl.getAttribute("data-panel-id") || panelEl.dataset.panelId || null;
+        return (
+          panelEl.getAttribute("data-panel-id") ||
+          panelEl.dataset.panelId ||
+          null
+        );
       }
     }
     return null;
   }
+
   function logReturn(label, arr, role, args) {
-    if (!DEBUG_DND) return;
+    if (!DEBUG_DND) return arr;
     console.log(label, {
       role,
       pointer: args.pointerCoordinates,
-      returning: Array.isArray(arr) ? arr.map(x => x.id) : arr,
+      returning: Array.isArray(arr) ? arr.map((x) => x.id) : arr,
     });
     return arr;
   }
+
+  // ✅ Track pointer globally into the SAME ref used by coordinator
+// ✅ Track pointer ONLY while dragging (and throttle to RAF)
+useEffect(() => {
+  if (!activeRole) return; // <-- key: no listeners unless dragging
+
+  let raf = 0;
+
+  const write = (x, y) => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      pointerRef.current = { x, y };
+    });
+  };
+
+  const onMove = (e) => {
+    if (e.touches?.[0]) write(e.touches[0].clientX, e.touches[0].clientY);
+    else write(e.clientX, e.clientY);
+  };
+
+  window.addEventListener("mousemove", onMove, { passive: true });
+  window.addEventListener("touchmove", onMove, { passive: true });
+
+  return () => {
+    if (raf) cancelAnimationFrame(raf);
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("touchmove", onMove);
+  };
+}, [activeRole, pointerRef]);
 
   // ✅ collision detection
   const collisionDetection = useMemo(() => {
     return (args) => {
       const role = args.active?.data?.current?.role;
-      const pt = args.pointerCoordinates;
 
       if (DEBUG_DND) {
         dlog("[CD entry]", {
           role,
-          pointer: pt,
+          pointer: args.pointerCoordinates,
           activeId: args.active?.id,
           overCell: panelOverCellId ?? null,
           droppablesCount: args.droppableContainers?.length,
         });
       }
 
-      // panel drag: keep your grid-cell behavior
+      // ✅ Panel drag: use our grid-cell id (your existing behavior)
       if (role === "panel") {
-        return logReturn("[CD return panel]", panelOverCellId ? [{ id: panelOverCellId }] : [], role, args);
+        return logReturn(
+          "[CD return panel]",
+          panelOverCellId ? [{ id: panelOverCellId }] : [],
+          role,
+          args
+        );
       }
 
       const hits = pointerWithin(args);
-      const fallback = hits.length ? hits : closestCenter(args);
-
-      if (DEBUG_DND) {
-        console.log("[CD core]", {
-          role,
-          pointer: args.pointerCoordinates,
-          hitsLen: hits.length,
-          fallbackLen: fallback?.length ?? 0,
-          // IMPORTANT: how many droppables actually have rects?
-          droppables: (args.droppableContainers || []).length,
-          rectReady: (args.droppableContainers || []).filter(dc => dc?.rect?.current).length,
-        });
-      }
-
+      const workingFallback = hits.length ? hits : closestCenter(args);
 
       const shouldScope = role === "instance" || role === "container";
-      if (!shouldScope) return logReturn("[CD return no hoveredPanelId]", fallback, role, args);
+      if (!shouldScope) {
+        return logReturn("[CD return no scope]", workingFallback, role, args);
+      }
 
       const getMeta = (c) => c?.data?.droppableContainer?.data?.current ?? null;
-
-      if (DEBUG_DND) {
-        dlog("[CD hits]", {
-          role,
-          pointer: pt,
-          hits: hits.map((h) => {
-            const d = getMeta(h);
-            return {
-              id: h.id,
-              role: d?.role,
-              panelId: d?.panelId,
-              containerId: d?.containerId,
-            };
-          }),
-        });
-      }
 
       const pickPanelIdFromHits = () => {
         const preferred = hits.find((c) => {
@@ -520,7 +536,8 @@ function GridInner({ components }) {
           const r = d?.role;
           return (
             d?.panelId &&
-            (r === "instance" || (typeof r === "string" && r.startsWith("container:")))
+            (r === "instance" ||
+              (typeof r === "string" && r.startsWith("container:")))
           );
         });
         if (preferred) return getMeta(preferred)?.panelId;
@@ -534,60 +551,51 @@ function GridInner({ components }) {
         return any ? getMeta(any)?.panelId : null;
       };
 
-      // ✅ Use DOM stack first (topmost panel wins), fallback to hits
-      const domPanel = pt ? getHoveredPanelId(pt) : null;
-      let hoveredPanelId = domPanel || pickPanelIdFromHits();
+      const domPanel = hoveredPanelIdRef.current;
+      const hoveredPanelId = domPanel || pickPanelIdFromHits();
 
       if (DEBUG_DND) {
         dlog("[CD hoveredPanelId]", {
           role,
-          pointer: pt,
+          pointer: args.pointerCoordinates,
           domPanel,
           hitsPanel: hoveredPanelId,
         });
       }
 
-      if (!hoveredPanelId) return logReturn("[CD return fallback]", fallback, role, args);
+      // ✅ If we can't determine a hovered panel, never break dropping:
+      if (!hoveredPanelId) {
+        return logReturn("[CD return no hoveredPanelId]", workingFallback, role, args);
+      }
 
-
+      // ✅ Scope-if-possible
       const scopedHits = hits.filter((c) => getMeta(c)?.panelId === hoveredPanelId);
+      const workingHits = scopedHits.length ? scopedHits : hits;
 
-      // ✅ FIX: prioritize instance-over-instance hits FIRST (prevents container:list “winning”)
       if (role === "instance") {
-        const instanceHits = scopedHits.filter((c) => getMeta(c)?.role === "instance");
-        if (instanceHits.length) return logReturn("[CD return instanceHits]", instanceHits, role, args);
+        const instanceHits = workingHits.filter((c) => getMeta(c)?.role === "instance");
+        if (instanceHits.length) {
+          return logReturn("[CD return instanceHits]", instanceHits, role, args);
+        }
 
-
-        const containerZoneHits = scopedHits.filter((c) =>
+        const containerZoneHits = workingHits.filter((c) =>
           String(getMeta(c)?.role || "").startsWith("container:")
         );
-        if (containerZoneHits.length) return logReturn("[CD return containerZoneHits]", containerZoneHits,role, args);
+        if (containerZoneHits.length) {
+          return logReturn("[CD return containerZoneHits]", containerZoneHits, role, args);
+        }
 
-        const panelTargets = scopedHits.filter((c) => getMeta(c)?.role === "panel:drop");
-        if (panelTargets.length) return logReturn("[CD return panelTargets]", panelTargets, role, args);
+        const panelTargets = workingHits.filter((c) => getMeta(c)?.role === "panel:drop");
+        if (panelTargets.length) {
+          return logReturn("[CD return panelTargets]", panelTargets, role, args);
+        }
 
-          return logReturn("[CD return fallback]", fallback, role, args);
-
-
+        return logReturn("[CD return workingFallback]", workingFallback, role, args);
       }
 
-      if (DEBUG_DND) {
-        dlog("[CD scopedHits]", {
-          role,
-          hoveredPanelId,
-          scoped: scopedHits.map((h) => {
-            const d = getMeta(h);
-            return {
-              id: h.id,
-              role: d?.role,
-              panelId: d?.panelId,
-              containerId: d?.containerId,
-            };
-          }),
-        });
-      }
-
-      return scopedHits.length ? scopedHits : fallback;
+      return workingHits.length
+        ? logReturn("[CD return workingHits]", workingHits, role, args)
+        : logReturn("[CD return workingFallback]", workingFallback, role, args);
     };
   }, [panelOverCellId]); // keep minimal deps
 
@@ -624,23 +632,35 @@ function GridInner({ components }) {
   const lastCellRef = useRef(null);
 
   const handleDragMove = () => {
-    if (!panelDragging) return;
-    if (rafRef.current) return;
+    if (!activeRole) return;
 
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
 
-      const live = pointerRef.current;
-      if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
+        // ✅ keep hovered panel fresh even here (helps if window move listener misses)
+        if (activeRole === "instance" || activeRole === "container") {
+          const pt = pointerRef.current;
+          if (pt?.x != null && pt?.y != null) {
+            hoveredPanelIdRef.current = getHoveredPanelId(pt);
+          }
+        }
 
-      const rc = getCellFromPointer(live.x, live.y);
-      const next = rc ? `cell-${rc.row}-${rc.col}` : null;
+        // panelOverCellId only for panel drags
+        if (!panelDragging) return;
 
-      if (next !== lastCellRef.current) {
-        lastCellRef.current = next;
-        setPanelOverCellId(next);
-      }
-    });
+        const live = pointerRef.current;
+        if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
+
+        const rc = getCellFromPointer(live.x, live.y);
+        const next = rc ? `cell-${rc.row}-${rc.col}` : null;
+
+        if (next !== lastCellRef.current) {
+          lastCellRef.current = next;
+          setPanelOverCellId(next);
+        }
+      });
+    }
   };
 
   const lastOverKeyRef = useRef("");
@@ -649,7 +669,6 @@ function GridInner({ components }) {
     const activeRoleNow = event.active?.data?.current?.role;
     const d = event.over?.data?.current ?? null;
 
-    // ✅ key “why is instance reorder wrong” log:
     if (DEBUG_DND && activeRoleNow === "instance") {
       dlog("[OVER raw]", {
         overId: event.over?.id ?? null,
@@ -670,9 +689,7 @@ function GridInner({ components }) {
       safe = ok ? safe : null;
     }
 
-    const key = safe
-      ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}|${event.over?.id ?? ""}`
-      : "";
+    const key = safe ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}` : "";
 
     if (key !== lastOverKeyRef.current) {
       lastOverKeyRef.current = key;
@@ -719,7 +736,11 @@ function GridInner({ components }) {
       return;
     }
 
-    const updated = sanitizePanelPlacement({ ...panel, row: rc.row, col: rc.col }, rows, cols);
+    const updated = sanitizePanelPlacement(
+      { ...panel, row: rc.row, col: rc.col },
+      rows,
+      cols
+    );
 
     dispatch(updatePanel(updated));
     socket.emit("update_panel", { panel: updated, gridId });
@@ -727,7 +748,7 @@ function GridInner({ components }) {
     pointerRef.current = { x: null, y: null };
     setPanelOverCellId(null);
     lastCellRef.current = null;
-
+    hoveredPanelIdRef.current = null;
     requestAnimationFrame(() => setPanelDragging(false));
   };
 
@@ -739,7 +760,7 @@ function GridInner({ components }) {
     pointerRef.current = { x: null, y: null };
 
     setPanelOverCellId(null);
-    lastCellRef.current = null;
+    hoveredPanelIdRef.current = null;
     requestAnimationFrame(() => setPanelDragging(false));
 
     const role = event.active?.data?.current?.role;
@@ -925,9 +946,9 @@ function GridInner({ components }) {
       measuring={{
         droppable: {
           strategy:
-            isContainerDrag || isInstanceDrag
-              ? MeasuringStrategy.Always
-              : MeasuringStrategy.BeforeDragging,
+  isContainerDrag || isInstanceDrag
+    ? MeasuringStrategy.WhileDragging
+    : MeasuringStrategy.BeforeDragging,
         },
       }}
       autoScroll={{
@@ -994,7 +1015,11 @@ function GridInner({ components }) {
 
         {activeId && activeRole === "instance" && activeInstance ? (
           <div className="instance-overlay" style={{ pointerEvents: "none" }}>
-            <InstanceComp id={activeInstance.id} label={activeInstance.label} overlay />
+            <InstanceComp
+              id={activeInstance.id}
+              label={activeInstance.label}
+              overlay
+            />
           </div>
         ) : null}
       </DragOverlay>
