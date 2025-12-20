@@ -18,5 +18,4 @@ export const GridDataContext = createContext({
   containersRender: [],
 
   // local re-render tick during drag (App state)
-  dragTick: 0,
 });

@@ -62,6 +62,7 @@ export default function App() {
     dispatch,
     socket,
     scheduleSoftTick,
+    pointerRef: livePointerRef
   });
 
   // ✅ containers used for rendering (draft during drag, real otherwise)
@@ -260,7 +261,7 @@ const deleteGridFinal = () => {
         softTick: state.softTick,
       },
       containersRender,
-      dragTick,
+      
     }),
     [
       state.userId,
@@ -273,7 +274,7 @@ const deleteGridFinal = () => {
       state.activeSize,
       state.softTick,
       containersRender,
-      dragTick,
+      
     ]
   );
 

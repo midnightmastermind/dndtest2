@@ -220,20 +220,20 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
   // ✅ flex needs explicit width constraints on children; grid does NOT
   const flexChildWidthStyle = isFlex
     ? (() => {
-        const s = {};
-        if (widthMode === "fixed") {
-          const w = Number(fixedWidth) || 0;
-          if (w > 0) s.width = `${w}px`;
-          const maxW = Number(maxWidthPx) || 0;
-          if (maxW > 0) s.maxWidth = `${maxW}px`;
-        } else {
-          const minW = Number(minWidthPx) || 0;
-          const maxW = Number(maxWidthPx) || 0;
-          if (minW > 0) s.minWidth = `${minW}px`;
-          if (maxW > 0) s.maxWidth = `${maxW}px`;
-        }
-        return s;
-      })()
+      const s = {};
+      if (widthMode === "fixed") {
+        const w = Number(fixedWidth) || 0;
+        if (w > 0) s.width = `${w}px`;
+        const maxW = Number(maxWidthPx) || 0;
+        if (maxW > 0) s.maxWidth = `${maxW}px`;
+      } else {
+        const minW = Number(minWidthPx) || 0;
+        const maxW = Number(maxWidthPx) || 0;
+        if (minW > 0) s.minWidth = `${minW}px`;
+        if (maxW > 0) s.maxWidth = `${maxW}px`;
+      }
+      return s;
+    })()
     : null;
 
   return (
@@ -272,18 +272,18 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
               // ✅ NEW: masonry columns styles
               ...(isColumns
                 ? {
-                    columnCount,
-                    columnWidth,
-                    // mimic gap using column-gap
-                    columnGap:
-                      gap === "none"
-                        ? "0px"
-                        : gap === "sm"
+                  columnCount,
+                  columnWidth,
+                  // mimic gap using column-gap
+                  columnGap:
+                    gap === "none"
+                      ? "0px"
+                      : gap === "sm"
                         ? "8px"
                         : gap === "lg"
-                        ? "16px"
-                        : "12px", // md default
-                  }
+                          ? "16px"
+                          : "12px", // md default
+                }
                 : {}),
             }}
           >
@@ -305,20 +305,20 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
                     // ✅ NEW: make each child its own column item
                     ...(isColumns
                       ? {
-                          breakInside: "avoid",
-                          WebkitColumnBreakInside: "avoid",
-                          marginBottom:
-                            gap === "none"
-                              ? "0px"
-                              : gap === "sm"
+                        breakInside: "avoid",
+                        WebkitColumnBreakInside: "avoid",
+                        marginBottom:
+                          gap === "none"
+                            ? "0px"
+                            : gap === "sm"
                               ? "8px"
                               : gap === "lg"
-                              ? "16px"
-                              : "12px",
-                        }
+                                ? "16px"
+                                : "12px",
+                      }
                       : {}),
                   }}
-                  className={cn("min-w-0", isColumns ? "w-full" : "h-full")}
+                  className={cn("min-w-0", (isFlex || isColumns) ? "w-full" : "h-full")}
                 >
                   {child}
                 </div>

@@ -90,7 +90,7 @@ function SortableContainerInner({
     },
   });
 
-  const DEBUG_HITBOXES = false;
+  const DEBUG_HITBOXES = true;
 
   const highlightDrop = isInstanceDrag && isHot;
 
@@ -163,19 +163,19 @@ function SortableContainerInner({
               position: "absolute",
               left: -15,
               right: -15,
-              top: -45,     // was top hitbox
-              bottom: -10,  // was bottom hitbox
+              top: -30,     // was top hitbox
+              bottom: -5,  // was bottom hitbox
               pointerEvents: "none",
               borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              zIndex: 2,
+              zIndex: 1,
               maxWidth: "unset",
               minHeight: "60px",
             }}
           />
 
           {/* VISIBLE LIST */}
-          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible" }}>
+          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible", zIndex: 2 }}>
             <SortableContext
               id={`container-sortable:${container.id}`}
               items={itemIds}
