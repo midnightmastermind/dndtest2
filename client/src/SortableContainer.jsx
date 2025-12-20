@@ -68,6 +68,7 @@ function SortableContainerInner({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    willChange: "transform",
     opacity: isDragging ? 0 : 1,
     pointerEvents: isDragging ? "none" : "auto",
   };
@@ -90,12 +91,13 @@ function SortableContainerInner({
     },
   });
 
-  const DEBUG_HITBOXES = true;
+  const DEBUG_HITBOXES = false;
 
   const highlightDrop = isInstanceDrag && isHot;
 
   const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
-
+  const isCrossContainerDrag =
+    isInstanceDrag && isHot && hotRole === "container:list";
   return (
     <div
       ref={setNodeRef}
@@ -136,7 +138,7 @@ function SortableContainerInner({
           {container.label}
         </div>
 
-        <div style={{display: "none"}} className="flex ml-auto">
+        <div className="flex ml-auto">
           <ButtonPopover label={<Settings className="h-4 w-4" />}>
             <ContainerForm
               value={draft}
@@ -179,10 +181,10 @@ function SortableContainerInner({
             <SortableContext
               id={`container-sortable:${container.id}`}
               items={itemIds}
-              strategy={verticalListSortingStrategy}
+              strategy={isCrossContainerDrag ? null : verticalListSortingStrategy}
             >
               {items.map((inst) => (
-                <SortableInstance key={inst.id} instance={inst} containerId={container.id} panelId={panelId} />
+                <SortableInstance key={inst.id} instance={inst} containerId={container.id} panelId={panelId} dispatch={dispatch}/>
               ))}
             </SortableContext>
           </div>

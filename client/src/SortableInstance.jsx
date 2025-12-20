@@ -3,8 +3,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import Instance from "./Instance";
 
-function SortableInstanceInner({ instance, containerId, panelId }) {
-  
+function SortableInstanceInner({ instance, containerId, panelId, dispatch }) {
   const {
     setNodeRef,
     attributes,
@@ -24,25 +23,27 @@ function SortableInstanceInner({ instance, containerId, panelId }) {
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    willChange: "transform",
     opacity: isDragging ? 0 : 1,
   };
 
 
-return (
-  <div
-    ref={setNodeRef}
-    className={`no-select instance-wrap ${isDragging ? "is-dragging" : ""}`}
-    style={{ ...style, touchAction: "none", boxSizing: "border-box" }}
-  >
-    <Instance
-      id={instance.id}
-      label={instance.label}
-      overlay={false}
-      dragAttributes={attributes}
-      dragListeners={listeners}
-    />
-  </div>
-);
+  return (
+    <div
+      ref={setNodeRef}
+      className={`no-select instance-wrap ${isDragging ? "is-dragging" : ""}`}
+      style={{ ...style, touchAction: "none", boxSizing: "border-box" }}
+    >
+      <Instance
+        dispatch={dispatch}
+        id={instance.id}
+        label={instance.label}
+        overlay={false}
+        dragAttributes={attributes}
+        dragListeners={listeners}
+      />
+    </div>
+  );
 
 }
 

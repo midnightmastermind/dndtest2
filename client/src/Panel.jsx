@@ -375,13 +375,13 @@ function Panel({
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
-    ? "2px solid rgba(50,150,255,0.9)"
-    : "none";
+      ? "2px solid rgba(50,150,255,0.9)"
+      : "none";
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
-const hotId = overData?.containerId ?? null;
-const hotRole = typeof overData?.role === "string" ? overData.role : "";
+  const hotId = overData?.containerId ?? null;
+  const hotRole = typeof overData?.role === "string" ? overData.role : "";
   return (
     <div
       className="panel-card bg-background rounded-lg border border-border shadow-xl"
@@ -421,11 +421,14 @@ const hotRole = typeof overData?.role === "string" ? overData.role : "";
         >
           <div
             className="drag-handle cursor-grab active:cursor-grabbing touch-none pl-2"
+            style={{ touchAction: "none" }}
             {...panelHandleProps}
           >
             <GripVertical className="h-4 w-4 text-white" />
           </div>
-
+          <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
+            {panel?.layout?.name}
+          </div>
           <div style={{ flex: 1, display: "flex", justifyContent: "end" }}>
             <ButtonPopover label={<Settings className="h-4 w-4" />}>
               <LayoutForm value={layout} onChange={setLayout} onDeletePanel={deletePanelFinal} />
@@ -489,11 +492,11 @@ const hotRole = typeof overData?.role === "string" ? overData.role : "";
                   container={c}
                   panelId={panel.id}
                   instancesById={instancesById}
-                 isHot={hotId === c.id}
-  hotRole={hotRole} addInstanceToContainer={addInstanceToContainer}
+                  isHot={hotId === c.id}
+                  hotRole={hotRole} addInstanceToContainer={addInstanceToContainer}
                   isDraggingContainer={isContainerDrag}
                   isInstanceDrag={isInstanceDrag}
-                  
+
                 />
               ))}
 

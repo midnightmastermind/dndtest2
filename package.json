@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "start": "concurrently \"npm run start:client\" \"npm run start:server\"",
-    "start:client": "npm --prefix ./client start",
+    "start": "npm run build:client && npm run serve",
+    "serve": "concurrently \"npm run serve:client\" \"npm run start:server\"",
+    "serve:client": "npx serve -s ./client/build",
     "start:server": "npm --prefix ./server run dev",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:client": "npm --prefix ./client run build",
+    "dev": "concurrently \"npm run dev:client\" \"npm run start:server\"",
+    "dev:client": "npm --prefix ./client start"
   },
   "repository": {
     "type": "git",
