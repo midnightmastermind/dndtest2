@@ -150,7 +150,7 @@ function GridCanvas({
       ref={gridRef}
       style={{
         position: "absolute",
-        inset: 0,
+        inset: -5,
         display: "grid",
         gridTemplateColumns: colTemplate,
         gridTemplateRows: rowTemplate,
@@ -159,6 +159,7 @@ function GridCanvas({
         overflow: "hidden",
         touchAction: "none",
         overscrollBehaviorY: "none",
+
       }}
     >
       {cells}
@@ -175,11 +176,11 @@ function GridCanvas({
             top: 0,
             bottom: 0,
             left: `${getColPosition(i)}%`,
-            width: 6,
-            marginLeft: -3,
+            width: 10,
+            marginLeft: -5,
             cursor: "col-resize",
             zIndex: 50,
-            background: "transparent",
+            background: "#8f969eff"
           }}
         />
       ))}
@@ -196,17 +197,18 @@ function GridCanvas({
             left: 0,
             right: 0,
             top: `${getRowPosition(i)}%`,
-            height: 6,
-            marginTop: -3,
+            height: 10,
+            marginTop: -5,
             cursor: "row-resize",
             zIndex: 50,
-            background: "transparent",
+            background: "#8f969eff"
           }}
         />
       ))}
 
       {/* Panels */}
       {visiblePanels.map((p) => (
+
         <Panel
           key={p.id}
           panel={p}

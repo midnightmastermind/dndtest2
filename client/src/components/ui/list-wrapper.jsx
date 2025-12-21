@@ -248,7 +248,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         className="h-full w-full"
       >
         <ScrollArea.Viewport
-          className={cn(viewportVariants({ insetX }), viewportClassName)}
+          className={cn(viewportVariants({ insetX }), viewportClassName, " pl-[15px] pr-[20px]")}
           style={{ overflowX, overflowY }}
         >
           <div
@@ -263,7 +263,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
                 justify,
                 dense,
               }),
-              listClassName
+              listClassName,
             )}
             style={{
               ...(gridTemplateColumns ? { gridTemplateColumns } : {}),
