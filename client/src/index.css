@@ -13,7 +13,7 @@ body,
   /* no outer scroll */
 
   overscroll-behavior-y: contain;
-
+  overscroll-behavior-x: contain;
 }
 
 #root {
@@ -170,7 +170,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 8px 3px 8px 12px;
   border-radius: 6px;
   background: #4372ac;
   border: 1px solid #3a4452;
@@ -250,6 +250,10 @@ button {
 
   .grid-wrapper {
     height: 90vh !important;
+  }
+  
+  .dnd-instance {
+    font-size: 10px;
   }
 }
 
@@ -382,6 +386,7 @@ html.dark {
   box-shadow:
     0 10px 22px rgba(0,0,0,0.55),
     0 1px 0 rgba(255,255,255,0.04) inset;
+    
 }
 
 /* --- Panel header subtle sheen (doesn't override bg) --- */
