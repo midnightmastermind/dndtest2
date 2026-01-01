@@ -231,11 +231,15 @@ button {
   .toolbar * {
     font-size: 8px !important;
   }
-
+  .toolbar .grid-select {
+    width: 100px;
+  } 
   .toolbar input[type="text"] {
     max-width: 50px !important;
   }
-
+  .button-span {
+    display: none !important;
+  }
   .toolbar input[type="number"] {
     max-width: 10px !important;
   }
@@ -248,12 +252,24 @@ button {
     font-size: 9px;
   }
 
+  
   .grid-wrapper {
     height: 90vh !important;
   }
   
   .dnd-instance {
     font-size: 10px;
+  }
+  
+  .panel-header button {
+    font-size: 8px !important;
+  }
+  
+  .panel-select button {
+    display: flex;
+    justify-content: center;
+    flex-wrap: nowrap;
+    min-width: 70px;
   }
 }
 

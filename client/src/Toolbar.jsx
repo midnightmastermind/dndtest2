@@ -114,7 +114,7 @@ const gridOptions = useMemo(
             <FormInput
               schema={{
                 type: "select",
-                className: "flex content-end",
+                className: "flex content-end grid-select",
                 key: "gridId",
                 label: "",
                 options: gridOptions,

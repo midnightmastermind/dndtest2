@@ -545,7 +545,7 @@ const deletePanelFinal = useCallback(() => {
 
           {/* ✅ stack selector + chevrons */}
           {showStackSelect ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 260 }}>
+            <div className="panel-selector" style={{ display: "flex", justifyContent: "start", alignItems: "center", maxWidth: 260 }}>
               <Button
                 variant="ghost"
                 size="sm"
@@ -560,7 +560,7 @@ const deletePanelFinal = useCallback(() => {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
 
-              <div style={{ width: 180 }}>
+              
                 <FormInput
                   value={{ activePanelId: selectedPanelId }}
                   onChange={(next) => {
@@ -569,6 +569,7 @@ const deletePanelFinal = useCallback(() => {
                   }}
                   schema={{
                     type: "select",
+                    className:"panel-select",
                     key: "activePanelId",
                     placeholder: "Select panel…",
                     options: stackList.map((p, idx) => {
@@ -577,10 +578,9 @@ const deletePanelFinal = useCallback(() => {
                       const label = name?.trim() ? name : `Panel ${idx + 1}`;
                       return { value: p.id, label };
                     }),
-                    className: "text-[11px] font-mono",
                   }}
                 />
-              </div>
+              
 
               <Button
                 variant="ghost"
@@ -618,7 +618,7 @@ const deletePanelFinal = useCallback(() => {
 
             <Button size="sm" onClick={() => addContainerToPanel(panel.id)}>
               <PlusSquare className="h-4 w-4 pr-[2px]" />
-              Container
+              <span className="button-span">Container</span>
             </Button>
 
             <Button
