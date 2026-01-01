@@ -114,6 +114,8 @@ export default function FormInput({ schema, value, onChange }) {
 
   const current = value?.[s.key];
 
+  // FormInput.jsx (PATCH)
+
   // TEXT
   if (type === "text-input") {
     return (
@@ -130,6 +132,11 @@ export default function FormInput({ schema, value, onChange }) {
           placeholder={s.placeholder}
           disabled={s.disabled}
           onChange={(e) => update(s.key, e.target.value)}
+
+          // ✅ forward handlers from schema
+          onKeyDown={s.onKeyDown}
+          onBlur={s.onBlur}
+          onFocus={s.onFocus}
         />
       </div>
     );
@@ -154,10 +161,17 @@ export default function FormInput({ schema, value, onChange }) {
           placeholder={s.placeholder}
           disabled={s.disabled}
           onChange={(e) => update(s.key, safeNum(e.target.value, current ?? 0))}
+
+          // ✅ forward handlers from schema
+          onKeyDown={s.onKeyDown}
+          onBlur={s.onBlur}
+          onFocus={s.onFocus}
         />
       </div>
     );
   }
+
+
 
   // SELECT
   if (type === "select") {
@@ -178,7 +192,7 @@ export default function FormInput({ schema, value, onChange }) {
           <SelectTrigger className="w-full">
             <SelectValue placeholder={s.placeholder ?? "Select…"} />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent {...(s.contentProps ?? {})}>
             {opts.map((opt) => (
               <SelectItem key={opt.value} value={opt.value}>
                 {opt.label}

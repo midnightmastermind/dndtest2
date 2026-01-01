@@ -1,17 +1,13 @@
 // InstanceInner.jsx
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useState, useCallback } from "react";
 import { GridDataContext } from "./GridDataContext";
 
 import { Settings } from "lucide-react";
 import InstanceForm from "./ui/InstanceForm";
 import ButtonPopover from "./ui/ButtonPopover";
-import { emit } from "./socket";
-import { updateInstanceAction, deleteInstanceAction } from "./state/actions";
 
-/**
- * Uses your action creators + socket emits.
- * Needs `dispatch` passed in.
- */
+import * as CommitHelpers from "./helpers/CommitHelpers";
+
 function InstanceInner({
   id,
   label,
@@ -19,37 +15,37 @@ function InstanceInner({
   dragAttributes,
   dragListeners,
 
-  // ✅ provide dispatch from parent
   dispatch,
+  socket, // ✅ NEW
 }) {
   const { activeId } = useContext(GridDataContext);
   const isOriginalActive = !overlay && activeId === id;
 
   const [draft, setDraft] = useState(() => ({ label: label ?? "" }));
 
-  // keep draft in sync if label changes from server
   useEffect(() => {
     setDraft({ label: label ?? "" });
   }, [label, id]);
 
-  const commitLabel = () => {
+  const commitLabel = useCallback(() => {
     const next = (draft?.label ?? "").trim();
     if (!next) return;
 
-    // ✅ optimistic reducer update
-    dispatch?.(updateInstanceAction({ id, label: next }));
+    // ✅ CommitHelpers expects { instance } with id
+    CommitHelpers.updateInstance({
+      dispatch,
+      socket,
+      instance: { id, label: next },
+    });
+  }, [draft?.label, id, dispatch, socket]);
 
-    // ✅ server update
-    emit("update_instance", { instance: { id, label: next } });
-  };
-
-  const deleteMe = () => {
-    // ✅ optimistic reducer update (also removes from all container.items in reducer)
-    dispatch?.(deleteInstanceAction(id));
-
-    // ✅ server delete (server should cascade remove from containers)
-    emit("delete_instance", { instanceId: id });
-  };
+  const deleteMe = useCallback(() => {
+    CommitHelpers.deleteInstance({
+      dispatch,
+      socket,
+      instanceId: id,
+    });
+  }, [id, dispatch, socket]);
 
   return (
     <div
@@ -65,8 +61,7 @@ function InstanceInner({
       {...(!overlay ? dragAttributes : {})}
       {...(!overlay ? dragListeners : {})}
     >
-      {/* ✅ settings popover next to label */}
-      <ButtonPopover style={{display: "none"}} label={<Settings className="h-4 w-4" />}>
+      <ButtonPopover style={{ display: "none" }} label={<Settings className="h-4 w-4" />}>
         <InstanceForm
           value={draft}
           onChange={setDraft}
@@ -75,10 +70,8 @@ function InstanceInner({
           instanceId={id}
         />
       </ButtonPopover>
-      {/* ✅ label gets its own div */}
-      <div style={{ flex: 1, minWidth: 0 }}>{label}</div>
 
-      
+      <div style={{ flex: 1, minWidth: 0 }}>{label}</div>
     </div>
   );
 }

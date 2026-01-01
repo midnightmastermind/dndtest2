@@ -249,7 +249,7 @@ function ensureLockDefaults(next) {
   };
 }
 
-export default function LayoutForm({ value, onChange, onDeletePanel, panelId }) {
+export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, panelId }) {
   const v = ensureLockDefaults(value);
 
   const display = v?.display ?? "grid";
@@ -295,16 +295,27 @@ export default function LayoutForm({ value, onChange, onDeletePanel, panelId }) 
       </div>
 
       {/* Name */}
-      <FormInput
-        schema={{
-          type: "text-input",
-          key: "name",
-          label: "Name",
-          placeholder: "Panel layout name",
-        }}
-        value={v}
-        onChange={(next) => onChange?.(ensureLockDefaults(next))}
-      />
+<FormInput
+  schema={{
+    type: "text-input",
+    key: "name",
+    label: "Name",
+    placeholder: "Panel layout name",
+    onKeyDown: (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.currentTarget.blur();
+      }
+    },
+    onBlur: () => {
+      onCommit?.(ensureLockDefaults(v));
+    },
+  }}
+  value={v}
+  onChange={(next) => onChange?.(ensureLockDefaults(next))}
+/>
+
+
 
       <Separator />
 

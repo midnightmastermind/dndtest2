@@ -248,7 +248,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         className="h-full w-full"
       >
         <ScrollArea.Viewport
-          className={cn(viewportVariants({ insetX }), viewportClassName, " pl-[15px] pr-[20px]")}
+          className={cn(viewportVariants({ insetX }), viewportClassName, " pl-[20px] pr-[25px]")}
           style={{ overflowX, overflowY }}
         >
           <div
@@ -330,7 +330,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         {scrollY !== "none" && (
           <ScrollArea.Scrollbar
             orientation="vertical"
-            className="flex h-full w-2.5 select-none touch-none p-[2px]"
+            className="flex h-full w-4 select-none touch-none p-[2px]"
           >
             <ScrollArea.Thumb className="flex-1 rounded-full bg-border/60" />
           </ScrollArea.Scrollbar>
@@ -339,7 +339,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         {scrollX !== "none" && (
           <ScrollArea.Scrollbar
             orientation="horizontal"
-            className="flex h-2.5 w-full select-none touch-none p-[2px]"
+            className="flex h-4 w-full select-none touch-none p-[2px]"
           >
             <ScrollArea.Thumb className="flex-1 rounded-full bg-border/60" />
           </ScrollArea.Scrollbar>

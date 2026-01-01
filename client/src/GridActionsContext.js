@@ -16,12 +16,5 @@ export const GridActionsContext = createContext({
   addContainerToPanel: () => {},
   addInstanceToContainer: () => {},
 
-  // ✅ shared pointer ref (IMPORTANT)
-  pointerRef: { current: { x: null, y: null } },
 
-  // dnd coordinator handlers (you pass these)
-  handleDragStart: () => {},
-  handleDragOver: () => {},
-  handleDragEnd: () => {},
-  handleDragCancel: () => {},
 });

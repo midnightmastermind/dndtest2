@@ -28,9 +28,12 @@ export const SelectContent = React.forwardRef(
       <SelectPrimitive.Content
         ref={ref}
         className={cn(
-          "z-[99999] min-w-[8rem] font-mono overflow-hidden rounded-sm  bg-inputScale-0 text-popover-foreground shadow-md",
+          // ✅ must be > fullscreen overlay zIndex (999999)
+          "z-[1000005] min-w-[8rem] font-mono overflow-hidden rounded-sm bg-inputScale-0 text-popover-foreground shadow-md",
           className
         )}
+        // ✅ popper respects side/top/bottom nicely
+        position="popper"
         {...props}
       >
         <SelectPrimitive.Viewport className="p-1 rounded border border-borderScale-0 bg-inputScale-0 text-xs">

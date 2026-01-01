@@ -1,17 +1,9 @@
-// App.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// App.jsx — STEP 2: commits routed through CommitHelpers / LayoutHelpers
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { socket } from "./socket";
 import { bindSocketToStore } from "./state/bindSocketToStore";
 
-import {
-  updateGridAction,
-  createPanelAction,
-  updatePanelAction,
-  createContainerAction,
-  createInstanceInContainerAction,
-} from "./state/actions";
-  import { deleteGridAction } from "./state/actions";
 import { ActionTypes } from "./state/actions";
 import Grid from "./Grid";
 import LoginScreen from "./LoginScreen";
@@ -20,13 +12,16 @@ import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
 
 import { useBoardState } from "./state/useBoardState";
-import { useDndReorderCoordinator } from "./helpers/useDndReorderCoordinator";
 
 import SortableContainer from "./SortableContainer";
 import SortableInstance from "./SortableInstance";
 import Instance from "./Instance";
 import Toolbar from "./Toolbar";
 import { SpinnerOverlay } from "./components/ui/spinner";
+
+import * as CommitHelpers from "./helpers/CommitHelpers";
+import * as LayoutHelpers from "./helpers/LayoutHelpers"; // ✅ NEW
+
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
   for (let r = 0; r < rows; r++) {
@@ -40,33 +35,6 @@ function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
 
 export default function App() {
   const { state, dispatch } = useBoardState();
-
-  // ✅ single shared live pointer ref for EVERYTHING (GridInner + coordinator)
-  const livePointerRef = useRef({ x: null, y: null });
-
-  // ✅ local tick for drag preview rendering (no reducer writes)
-  const [dragTick, setDragTick] = useState(0);
-  const scheduleSoftTick = useCallback(() => {
-    setDragTick((x) => x + 1);
-  }, []);
-
-  const {
-    handleDragStart,
-    handleDragOver,
-    handleDragEnd,
-    handleDragCancel,
-    containersDraftRef,
-    getWorkingContainers,
-  } = useDndReorderCoordinator({
-    state,
-    dispatch,
-    socket,
-    scheduleSoftTick,
-    pointerRef: livePointerRef
-  });
-
-  // ✅ containers used for rendering (draft during drag, real otherwise)
-  const containersRender = getWorkingContainers();
 
   // ✅ instance lookup map once
   const instancesById = useMemo(() => {
@@ -109,10 +77,7 @@ export default function App() {
       didRequest = true;
 
       const savedGridId = localStorage.getItem("moduli-gridId");
-      socket.emit(
-        "request_full_state",
-        savedGridId ? { gridId: savedGridId } : undefined
-      );
+      socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
     };
 
     if (socket.connected) request();
@@ -131,9 +96,9 @@ export default function App() {
     const newGridId = e.target.value;
     if (!newGridId || newGridId === state.gridId) return;
 
-dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
+    dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
     localStorage.setItem("moduli-gridId", newGridId);
-    
+
     socket.emit("request_full_state", { gridId: newGridId });
   };
 
@@ -142,30 +107,62 @@ dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
     socket.emit("request_full_state");
   };
 
-  const commitGridName = () => {
-    if (!state.gridId) return;
-    const trimmed = (gridName || "").trim();
-    if (!trimmed) return;
+  const commitGridName = useCallback(
+    (nextName) => {
+      const gridId = state?.gridId || state?.grid?._id;
+      if (!gridId) return;
 
-    dispatch(updateGridAction({ name: trimmed }));
-    socket.emit("update_grid", { gridId: state.gridId, name: trimmed });
-  };
+      const trimmed = String(nextName ?? gridName ?? "").trim();
+      if (!trimmed) return;
 
-  const updateRows = (val) => {
-    if (!state.gridId) return;
-    const num = Math.max(1, Number(val) || 1);
-    dispatch(updateGridAction({ rows: num }));
-    socket.emit("update_grid", { gridId: state.gridId, rows: num });
-  };
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { name: trimmed }, // ✅ PATCH
+        emit: true,
+      });
+    },
+    [dispatch, state?.gridId, state?.grid?._id, gridName]
+  );
 
-  const updateCols = (val) => {
-    if (!state.gridId) return;
-    const num = Math.max(1, Number(val) || 1);
-    dispatch(updateGridAction({ cols: num }));
-    socket.emit("update_grid", { gridId: state.gridId, cols: num });
-  };
+  const updateRows = useCallback(
+    (val) => {
+      const gridId = state?.gridId || state?.grid?._id;
+      if (!gridId) return;
 
-  const addNewPanel = () => {
+      const num = Math.max(1, Number(val) || 1);
+
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { rows: num }, // ✅ PATCH
+        emit: true,
+      });
+    },
+    [dispatch, state?.gridId, state?.grid?._id]
+  );
+
+  const updateCols = useCallback(
+    (val) => {
+      const gridId = state?.gridId || state?.grid?._id;
+      if (!gridId) return;
+
+      const num = Math.max(1, Number(val) || 1);
+
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { cols: num }, // ✅ PATCH
+        emit: true,
+      });
+    },
+    [dispatch, state?.gridId, state?.grid?._id]
+  );
+
+  const addNewPanel = useCallback(() => {
     if (!state.gridId || !state.grid) return;
 
     const panelId = crypto.randomUUID();
@@ -175,21 +172,22 @@ dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
       state.grid.cols ?? 1
     );
 
+    const panelNumber = (state.panels?.length || 0) + 1;
+
     const panel = {
       id: panelId,
       role: "panel",
-      type: "",
       row,
       col,
       width: 1,
       height: 1,
       containers: [],
       gridId: state.gridId,
+      layout: { name: `Panel ${panelNumber}` },
     };
 
-    dispatch(createPanelAction(panel));
-    socket.emit("create_panel", { panel });
-  };
+    CommitHelpers.createPanel({ dispatch, socket, panel, emit: true });
+  }, [dispatch, state.gridId, state.grid, state.panels]);
 
   const addContainerToPanel = useCallback(
     (panelId) => {
@@ -199,19 +197,20 @@ dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
       const label = `List ${(state.containers?.length || 0) + 1}`;
       const container = { id, label, items: [] };
 
-      dispatch(createContainerAction(container));
-      socket.emit("create_container", { container });
+      // 1) create container (hard)
+      CommitHelpers.createContainer({ dispatch, socket, container, emit: true });
 
+      // 2) attach to panel (hard)
       const panel = (state.panels || []).find((p) => p.id === panelId);
       if (!panel) return;
 
-      const nextPanel = {
-        ...panel,
-        containers: [...(panel.containers || []), id],
-      };
-
-      dispatch(updatePanelAction(nextPanel));
-      socket.emit("update_panel", { panel: nextPanel, gridId: state.gridId });
+      LayoutHelpers.addContainerToPanel({
+        dispatch,
+        socket,
+        panel,
+        containerId: id,
+        emit: true,
+      });
     },
     [dispatch, state.gridId, state.containers, state.panels]
   );
@@ -224,25 +223,33 @@ dispatch({ type: ActionTypes.SET_GRID_ID, payload: newGridId });
       const label = `Item ${(state.instances?.length || 0) + 1}`;
       const instance = { id, label };
 
-      dispatch(createInstanceInContainerAction({ containerId, instance }));
-      socket.emit("create_instance_in_container", { containerId, instance });
+      // ✅ If you DON'T have LayoutHelpers.createInstanceInContainer,
+      // do it explicitly here using CommitHelpers + LayoutHelpers.addInstanceToContainer
+
+      // 1) create instance (hard)
+      CommitHelpers.createInstance({ dispatch, socket, instance, emit: true });
+
+      // 2) attach to container (hard)
+      const container = (state.containers || []).find((c) => c.id === containerId);
+      if (!container) return;
+
+      LayoutHelpers.addInstanceToContainer({
+        dispatch,
+        socket,
+        container,
+        instanceId: id,
+        emit: true,
+      });
     },
-    [dispatch, state.instances]
+    [dispatch, state.instances, state.containers]
   );
 
+  const deleteGridFinal = useCallback(() => {
+    const gridId = state?.gridId || state?.grid?._id;
+    if (!gridId) return;
 
-const deleteGridFinal = () => {
-  const gridId = state?.gridId || state?.grid?._id;
-  if (!gridId) return;
-
-  // optimistic remove from local state (matches reducer + bindSocketToStore)
-  dispatch(deleteGridAction(gridId)); // payload: { gridId } :contentReference[oaicite:4]{index=4}
-
-  // tell backend (server should accept { gridId })
-  socket.emit("delete_grid", { gridId });
-
-  // optional: clear any local pointers
-};
+    CommitHelpers.deleteGrid({ dispatch, socket, gridId, emit: true });
+  }, [dispatch, state?.gridId, state?.grid?._id]);
 
   // -----------------------------
   // CONTEXT VALUES
@@ -260,8 +267,6 @@ const deleteGridFinal = () => {
         activeSize: state.activeSize,
         softTick: state.softTick,
       },
-      containersRender,
-      
     }),
     [
       state.userId,
@@ -273,8 +278,6 @@ const deleteGridFinal = () => {
       state.activeId,
       state.activeSize,
       state.softTick,
-      containersRender,
-      
     ]
   );
 
@@ -282,32 +285,12 @@ const deleteGridFinal = () => {
     () => ({
       socket,
       dispatch,
-      updatePanel: updatePanelAction,
-      updateGrid: updateGridAction,
 
       instancesById,
       addContainerToPanel,
       addInstanceToContainer,
-
-      pointerRef: livePointerRef,
-      
-      handleDragStart,
-      handleDragOver,
-      handleDragEnd,
-      handleDragCancel,
     }),
-    [
-      socket,
-      dispatch,
-      instancesById,
-      addContainerToPanel,
-      addInstanceToContainer,
-      livePointerRef, // ✅ include so it's never accidentally stale
-      handleDragStart,
-      handleDragOver,
-      handleDragEnd,
-      handleDragCancel,
-    ]
+    [dispatch, instancesById, addContainerToPanel, addInstanceToContainer]
   );
 
   const components = useMemo(

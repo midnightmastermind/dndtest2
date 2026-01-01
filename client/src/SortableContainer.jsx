@@ -1,7 +1,11 @@
 // SortableContainer.jsx
 import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 
@@ -10,8 +14,7 @@ import { Settings, PlusSquare, GripVertical } from "lucide-react";
 import ButtonPopover from "./ui/ButtonPopover";
 import ContainerForm from "./ui/ContainerForm";
 
-import { emit } from "./socket";
-import { updateContainerAction, deleteContainerAction } from "./state/actions";
+import * as CommitHelpers from "./helpers/CommitHelpers";
 
 function SortableContainerInner({
   container,
@@ -27,6 +30,7 @@ function SortableContainerInner({
   hotRole = "",
 
   dispatch,
+  socket, // ✅ required for hard commits
 }) {
   const onAdd = useCallback(
     () => addInstanceToContainer(container.id),
@@ -39,31 +43,40 @@ function SortableContainerInner({
     setDraft({ label: container.label ?? "" });
   }, [container.id, container.label]);
 
-  const commitLabel = () => {
+  const commitLabel = useCallback(() => {
     const next = (draft?.label ?? "").trim();
     if (!next) return;
-    dispatch?.(updateContainerAction({ id: container.id, label: next }));
-    emit("update_container", { container: { id: container.id, label: next } });
-  };
 
-  const deleteMe = () => {
-    dispatch?.(deleteContainerAction(container.id));
-    emit("delete_container", { containerId: container.id });
-  };
+    // ✅ CommitHelpers expects { container } with id
+    CommitHelpers.updateContainer({
+      dispatch,
+      socket,
+      container: { id: container.id, label: next },
+    });
+  }, [draft?.label, container.id, dispatch, socket]);
 
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
-    id: container.id,
-    data: {
-      role: "container",
+  const deleteMe = useCallback(() => {
+    CommitHelpers.deleteContainer({
+      dispatch,
+      socket,
       containerId: container.id,
-      panelId,
-      label: container.label,
-    },
-    transition: {
-      duration: 120,
-      easing: "cubic-bezier(0.25, 1, 0.5, 1)",
-    },
-  });
+    });
+  }, [container.id, dispatch, socket]);
+
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({
+      id: container.id,
+      data: {
+        role: "container",
+        containerId: container.id,
+        panelId,
+        label: container.label,
+      },
+      transition: {
+        duration: 120,
+        easing: "cubic-bezier(0.25, 1, 0.5, 1)",
+      },
+    });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -92,12 +105,9 @@ function SortableContainerInner({
   });
 
   const DEBUG_HITBOXES = false;
-
   const highlightDrop = isInstanceDrag && isHot;
-
   const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
-  const isCrossContainerDrag =
-    isInstanceDrag && isHot && hotRole === "container:list";
+
   return (
     <div
       ref={setNodeRef}
@@ -158,35 +168,42 @@ function SortableContainerInner({
       {/* BODY */}
       <div className="container-body" style={{ flex: 1, overflow: "visible", display: "flex" }}>
         <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
-          {/* ✅ ONE hitbox covers old TOP + LIST + BOTTOM */}
           <div
             ref={list.setNodeRef}
             style={{
               position: "absolute",
               left: -15,
               right: -15,
-              top: -30,     // was top hitbox
-              bottom: -5,  // was bottom hitbox
-              pointerEvents: "none",
+              top: -30,
+              bottom: -5,
               borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              zIndex: 1,
+              zIndex: 2,
+              pointerEvents: "none",
               maxWidth: "unset",
               minHeight: "60px",
             }}
           />
 
-          {/* VISIBLE LIST */}
-          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible", zIndex: 2 }}>
-            <SortableContext
-              id={`container-sortable:${container.id}`}
-              items={itemIds}
-              strategy={isCrossContainerDrag ? null : verticalListSortingStrategy}
-            >
-              {items.map((inst) => (
-                <SortableInstance key={inst.id} instance={inst} containerId={container.id} panelId={panelId} dispatch={dispatch}/>
-              ))}
-            </SortableContext>
+          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible", zIndex: 1 }}>
+            {items.length > 0 && (
+              <SortableContext
+                id={`container-sortable:${container.id}`}
+                items={itemIds}
+                strategy={verticalListSortingStrategy}
+              >
+                {items.map((inst) => (
+                  <SortableInstance
+                    key={inst.id}
+                    instance={inst}
+                    containerId={container.id}
+                    panelId={panelId}
+                    dispatch={dispatch}
+                    socket={socket} // ✅ pass through for InstanceInner commits
+                  />
+                ))}
+              </SortableContext>
+            )}
           </div>
         </div>
       </div>
@@ -211,5 +228,6 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   if (prev.hotRole !== next.hotRole) return false;
 
   if (prev.dispatch !== next.dispatch) return false;
+  if (prev.socket !== next.socket) return false;
   return true;
 });

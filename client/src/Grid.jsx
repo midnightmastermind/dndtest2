@@ -1,23 +1,30 @@
-// GridInner.jsx
-import React, { useContext, useMemo, useRef, useState, useEffect } from "react";
-import {
-  useDroppable,
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  TouchSensor,
-  DragOverlay,
-  pointerWithin,
-  closestCenter,
-} from "@dnd-kit/core";
+// GridInner.jsx — MERGED (Grid is dumb: render + resize + wire DnDContext)
+// ✅ DnDKit + native/cross-window drag logic lives in useDnDControlCoordinator
+// ✅ Grid only wires DndContext to coordinator outputs + renders overlays/canvas
+// ✅ Stacks are draft-aware and owned by coordinator (no Grid commits / repairs)
+
+import React, {
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
+import { useDroppable, DndContext, DragOverlay } from "@dnd-kit/core";
 import { MeasuringStrategy } from "@dnd-kit/core";
 import { snapCenterToCursor } from "@dnd-kit/modifiers";
+
 import Panel from "./Panel";
 import PanelClone from "./PanelClone";
+import FullscreenOverlay from "./ui/FullscreenOverlay";
+
 import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
 import { GripVertical } from "lucide-react";
+
+import { useDnDControlCoordinator } from "./helpers/useDnDControlCoordinator";
+import * as CommitHelpers from "./helpers/CommitHelpers";
 
 /* -------------------------------------------
    ✅ Overlay clone for CONTAINER drags
@@ -107,6 +114,7 @@ function GridCanvas({
   panelDragging,
   components,
   dispatch,
+  socket,
   startColResize,
   startRowResize,
   getColPosition,
@@ -114,6 +122,9 @@ function GridCanvas({
   highlightCellId,
   panelProps,
   activeRole,
+  getStackForPanel,
+  fullscreenPanelId,
+  setFullscreenPanelId,
 }) {
   const cells = useMemo(() => {
     const out = [];
@@ -141,6 +152,7 @@ function GridCanvas({
         );
       }
     }
+
     return out;
   }, [rows, cols, highlightCellId, activeRole]);
 
@@ -155,11 +167,12 @@ function GridCanvas({
         gridTemplateColumns: colTemplate,
         gridTemplateRows: rowTemplate,
         width: "100%",
-        height: "95vh",
+        height: "99vh",
         overflow: "hidden",
         touchAction: "none",
         overscrollBehaviorY: "none",
-
+        margin: 3,
+        marginTop: 5,
       }}
     >
       {cells}
@@ -176,11 +189,11 @@ function GridCanvas({
             top: 0,
             bottom: 0,
             left: `${getColPosition(i)}%`,
-            width: 10,
-            marginLeft: -5,
+            width: 6,
+            marginLeft: -3,
             cursor: "col-resize",
             zIndex: 50,
-            background: "#8f969eff"
+            background: "#8f969eff",
           }}
         />
       ))}
@@ -197,112 +210,86 @@ function GridCanvas({
             left: 0,
             right: 0,
             top: `${getRowPosition(i)}%`,
-            height: 10,
-            marginTop: -5,
+            height: 6,
+            marginTop: -3,
             cursor: "row-resize",
             zIndex: 50,
-            background: "#8f969eff"
+            background: "#8f969eff",
           }}
         />
       ))}
 
       {/* Panels */}
-      {visiblePanels.map((p) => (
+      {visiblePanels.map((p) => {
+        if (fullscreenPanelId !== null) return null;
 
-        <Panel
-          key={p.id}
-          panel={p}
-          dispatch={dispatch}
-          gridRef={gridRef}
-          cols={cols}
-          rows={rows}
-          activeId={activeId}
-          components={components}
-          gridActive={panelDragging}
-          {...panelProps}
-        />
-      ))}
+        const display = p?.layout?.style?.display ?? "block";
+        if (display === "none") return null;
+
+        return (
+          <Panel
+            key={p.id}
+            panel={p}
+            dispatch={dispatch}
+            socket={socket}
+            gridRef={gridRef}
+            cols={cols}
+            rows={rows}
+            activeId={activeId}
+            components={components}
+            gridActive={panelDragging}
+            stackPanels={getStackForPanel?.(p) ?? null}
+            {...panelProps}
+            fullscreenPanelId={fullscreenPanelId}
+            setFullscreenPanelId={setFullscreenPanelId}
+          />
+        );
+      })}
     </div>
   );
 }
 
 function GridInner({ components }) {
-  const { state, containersRender } = useContext(GridDataContext);
+  const { state } = useContext(GridDataContext);
 
-  const {
-    handleDragStart: handleDragStartProp,
-    handleDragOver: handleDragOverProp,
-    handleDragEnd: handleDragEndProp,
-    handleDragCancel: handleDragCancelProp,
-    dispatch,
-    updatePanel,
-    updateGrid,
-    socket,
-    addContainerToPanel,
-    addInstanceToContainer,
-    instancesById,
-    pointerRef, // ✅ shared ref from App.jsx
-  } = useContext(GridActionsContext);
+  const [dragTick, setDragTick] = useState(0);
+  const scheduleSoftTick = useCallback(() => setDragTick((x) => x + 1), []);
 
-  const DEBUG_DND = false;
-  const debugRafRef = useRef({ t: 0 });
-
-  // ✅ Cache hovered panel id (so collisionDetection doesn't call elementsFromPoint every call)
-  const hoveredPanelIdRef = useRef(null);
-
-  // PERF FIX: throttle elementsFromPoint
-  const lastHoverUpdateRef = useRef(0);
-  const lastHoverPtRef = useRef({ x: null, y: null });
-
-  function dlog(label, payload) {
-    if (!DEBUG_DND) return;
-    const now = performance.now();
-    if (now - debugRafRef.current.t < 100) return;
-    debugRafRef.current.t = now;
-    console.groupCollapsed(label);
-    console.log(payload);
-    console.groupEnd();
-  }
-
-  const sensors = useSensors(
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 150, tolerance: 5 },
-      eventOptions: { passive: false },
-    }),
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
-  );
+  const { dispatch, socket, addContainerToPanel, addInstanceToContainer, instancesById } =
+    useContext(GridActionsContext);
 
   const grid = state.grid;
   const gridId = grid?._id;
   const rows = grid?.rows ?? 1;
   const cols = grid?.cols ?? 1;
 
+  const gridRef = useRef(null);
+
   const visiblePanels = useMemo(() => {
     const arr = state.panels || [];
     return arr.filter((p) => p.gridId === gridId);
   }, [state.panels, gridId]);
 
-  const gridRef = useRef(null);
 
-  const [activeId, setActiveId] = useState(null);
-  const [activeRole, setActiveRole] = useState(null);
-  const [panelDragging, setPanelDragging] = useState(false);
-  const [overData, setOverData] = useState(null);
+  // ✅ Fullscreen is overlay-only
+  const [fullscreenPanelId, setFullscreenPanelId] = useState(null);
 
-  const isContainerDrag = activeRole === "container";
-  const isInstanceDrag = activeRole === "instance";
-
-  const [panelOverCellId, setPanelOverCellId] = useState(null);
-
-  // ✅ sizes
+  // -----------------------------
+  // ✅ Grid sizing (NOT DnD; stays here)
+  // -----------------------------
   const ensureSizes = (arr, count) => {
     if (!Array.isArray(arr) || arr.length === 0) return Array(count).fill(1);
     if (arr.length === count) return arr;
     if (arr.length < count) return [...arr, ...Array(count - arr.length).fill(1)];
     return arr.slice(0, count);
   };
+
+  function sameArray(a = [], b = []) {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
 
   const [colSizes, setColSizes] = useState(() => ensureSizes(grid?.colSizes, cols));
   const [rowSizes, setRowSizes] = useState(() => ensureSizes(grid?.rowSizes, rows));
@@ -312,21 +299,16 @@ function GridInner({ components }) {
     sizesRef.current = { colSizes, rowSizes };
   }, [colSizes, rowSizes]);
 
-  function sameArray(a = [], b = []) {
-    if (a === b) return true;
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
-  }
-
   useEffect(() => {
     const next = ensureSizes(grid?.colSizes, cols);
     setColSizes((prev) => (sameArray(prev, next) ? prev : next));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cols, grid?._id]);
 
   useEffect(() => {
     const next = ensureSizes(grid?.rowSizes, rows);
     setRowSizes((prev) => (sameArray(prev, next) ? prev : next));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, grid?._id]);
 
   useEffect(() => {
@@ -338,424 +320,72 @@ function GridInner({ components }) {
   const colTemplate = colSizes.map((s) => `${s}fr`).join(" ");
   const rowTemplate = rowSizes.map((s) => `${s}fr`).join(" ");
 
-  const getPanel = (id) => visiblePanels.find((p) => p.id === id);
-
-  const clamp = (n, min, max) => Math.max(min, Math.min(n, max));
-
-  const getCellFromPointer = (clientX, clientY) => {
-    const gridEl = gridRef.current;
-    if (!gridEl) return null;
-
-    const rect = gridEl.getBoundingClientRect();
-
-    const inside =
-      clientX >= rect.left &&
-      clientX <= rect.right &&
-      clientY >= rect.top &&
-      clientY <= rect.bottom;
-
-    if (!inside) return null;
-
-    const x = clamp(clientX - rect.left, 0, rect.width - 1);
-    const y = clamp(clientY - rect.top, 0, rect.height - 1);
-
-    const totalCols = colSizes.reduce((a, b) => a + b, 0);
-    const totalRows = rowSizes.reduce((a, b) => a + b, 0);
-
-    let col = colSizes.length - 1;
-    let accX = 0;
-    for (let i = 0; i < colSizes.length; i++) {
-      accX += (colSizes[i] / totalCols) * rect.width;
-      if (x < accX) {
-        col = i;
-        break;
-      }
-    }
-
-    let row = rowSizes.length - 1;
-    let accY = 0;
-    for (let i = 0; i < rowSizes.length; i++) {
-      accY += (rowSizes[i] / totalRows) * rect.height;
-      if (y < accY) {
-        row = i;
-        break;
-      }
-    }
-
-    return { row, col };
-  };
-
-  function sanitizePanelPlacement(panel, rCount, cCount) {
-    return {
-      ...panel,
-      row: Math.max(0, Math.min(panel.row, rCount - 1)),
-      col: Math.max(0, Math.min(panel.col, cCount - 1)),
-      width: panel.width,
-      height: panel.height,
-    };
-  }
-
-  const getStartClientX = (event) =>
-    event?.activatorEvent?.clientX ?? event?.activatorEvent?.touches?.[0]?.clientX;
-
-  const getStartClientY = (event) =>
-    event?.activatorEvent?.clientY ?? event?.activatorEvent?.touches?.[0]?.clientY;
-
-
-  function getHoveredPanelId(pt) {
-    if (!pt) return null;
-
-    const stack = document.elementsFromPoint(pt.x, pt.y);
-
-    if (DEBUG_DND) {
-      const top10 = stack.slice(0, 10).map((el) => ({
-        tag: el.tagName,
-        cls: el.className,
-        panel: el.closest?.("[data-panel-id]")?.getAttribute("data-panel-id") || null,
-        droppable: el.getAttribute?.("data-dndkit-droppable-id") || null,
-        draggable: el.getAttribute?.("data-dndkit-draggable-id") || null,
-      }));
-      dlog("[DOM stack]", { pt, top10 });
-    }
-
-    for (const el of stack) {
-      if (el.closest?.(".panel-overlay, .container-overlay, .instance-overlay")) continue;
-      const panelEl = el.closest?.("[data-panel-id]");
-      if (panelEl) {
-        return (
-          panelEl.getAttribute("data-panel-id") ||
-          panelEl.dataset.panelId ||
-          null
-        );
-      }
-    }
-    return null;
-  }
-
-  function logReturn(label, arr, role, args) {
-    if (!DEBUG_DND) return arr;
-    console.log(label, {
-      role,
-      pointer: args.pointerCoordinates,
-      returning: Array.isArray(arr) ? arr.map((x) => x.id) : arr,
-    });
-    return arr;
-  }
-
-  // ✅ Track pointer ONLY while dragging (and throttle to RAF)
-  useEffect(() => {
-    if (!activeRole) return;
-
-    let raf = 0;
-
-    const write = (x, y) => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        pointerRef.current = { x, y };
-      });
-    };
-
-    const onMove = (e) => {
-      if (e.touches?.[0]) write(e.touches[0].clientX, e.touches[0].clientY);
-      else write(e.clientX, e.clientY);
-    };
-
-    window.addEventListener("mousemove", onMove, { passive: true });
-    window.addEventListener("touchmove", onMove, { passive: true });
-
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("touchmove", onMove);
-    };
-  }, [activeRole, pointerRef]);
-
-  // ✅ collision detection
-  const collisionDetection = useMemo(() => {
-    return (args) => {
-      const role = args.active?.data?.current?.role;
-
-      if (DEBUG_DND) {
-        dlog("[CD entry]", {
-          role,
-          pointer: args.pointerCoordinates,
-          activeId: args.active?.id,
-          overCell: panelOverCellId ?? null,
-          droppablesCount: args.droppableContainers?.length,
-        });
-      }
-
-      if (role === "panel") {
-        return logReturn(
-          "[CD return panel]",
-          panelOverCellId ? [{ id: panelOverCellId }] : [],
-          role,
-          args
-        );
-      }
-
-      // PERF FIX: avoid computing closestCenter unless needed
-      const hits = pointerWithin(args);
-      const shouldScope = role === "instance" || role === "container";
-
-      // Non-scoped roles: only do closestCenter if pointerWithin had no hits
-      if (!shouldScope) {
-        if (hits.length) return logReturn("[CD return no scope hits]", hits, role, args);
-        const cc = closestCenter(args);
-        return logReturn("[CD return no scope cc]", cc, role, args);
-      }
-
-      const getMeta = (c) => c?.data?.droppableContainer?.data?.current ?? null;
-
-      const pickPanelIdFromHits = () => {
-        const preferred = hits.find((c) => {
-          const d = getMeta(c);
-          const r = d?.role;
-          return (
-            d?.panelId &&
-            (r === "instance" || (typeof r === "string" && r.startsWith("container:")))
-          );
-        });
-        if (preferred) return getMeta(preferred)?.panelId;
-
-        const panelDrop = hits.find(
-          (c) => getMeta(c)?.role === "panel:drop" && getMeta(c)?.panelId
-        );
-        if (panelDrop) return getMeta(panelDrop)?.panelId;
-
-        const any = hits.find((c) => !!getMeta(c)?.panelId);
-        return any ? getMeta(any)?.panelId : null;
-      };
-
-      const domPanel = hoveredPanelIdRef.current;
-      const hoveredPanelId = domPanel || pickPanelIdFromHits();
-
-      if (DEBUG_DND) {
-        dlog("[CD hoveredPanelId]", {
-          role,
-          pointer: args.pointerCoordinates,
-          domPanel,
-          hitsPanel: hoveredPanelId,
-        });
-      }
-
-      // If we can't determine a hovered panel, fall back safely
-      if (!hoveredPanelId) {
-        if (hits.length) return logReturn("[CD return no hoveredPanelId hits]", hits, role, args);
-        const cc = closestCenter(args);
-        return logReturn("[CD return no hoveredPanelId cc]", cc, role, args);
-      }
-
-      const scopedHits = hits.filter((c) => getMeta(c)?.panelId === hoveredPanelId);
-      const workingHits = scopedHits.length ? scopedHits : hits;
-
-      if (role === "instance") {
-        const instanceHits = workingHits.filter((c) => getMeta(c)?.role === "instance");
-        if (instanceHits.length) {
-          return logReturn("[CD return instanceHits]", instanceHits, role, args);
-        }
-
-        const containerZoneHits = workingHits.filter((c) =>
-          String(getMeta(c)?.role || "").startsWith("container:")
-        );
-        if (containerZoneHits.length) {
-          return logReturn("[CD return containerZoneHits]", containerZoneHits, role, args);
-        }
-
-        const panelTargets = workingHits.filter((c) => getMeta(c)?.role === "panel:drop");
-        if (panelTargets.length) {
-          return logReturn("[CD return panelTargets]", panelTargets, role, args);
-        }
-
-        // final fallback
-        if (hits.length) return logReturn("[CD return hits fallback]", hits, role, args);
-        const cc = closestCenter(args);
-        return logReturn("[CD return cc fallback]", cc, role, args);
-      }
-
-      // container role
-      if (workingHits.length) return logReturn("[CD return workingHits]", workingHits, role, args);
-      if (hits.length) return logReturn("[CD return hits fallback]", hits, role, args);
-      const cc = closestCenter(args);
-      return logReturn("[CD return cc fallback]", cc, role, args);
-    };
-  }, [panelOverCellId]);
-
-  const handleDragStart = (event) => {
-    setActiveId(event.active.id);
-    const role = event.active?.data?.current?.role ?? null;
-    setActiveRole(role);
-
-    const data = event.active?.data?.current;
-
-    if (data?.role === "panel") {
-      setPanelDragging(true);
-
-      const startX = getStartClientX(event);
-      const startY = getStartClientY(event);
-
-      pointerRef.current = { x: startX ?? null, y: startY ?? null };
-
-      if (typeof startX === "number" && typeof startY === "number") {
-        const rc = getCellFromPointer(startX, startY);
-        const next = rc ? `cell-${rc.row}-${rc.col}` : null;
-        setPanelOverCellId(next);
-      } else {
-        setPanelOverCellId(null);
-      }
-      return;
-    }
-
-    handleDragStartProp?.(event);
-  };
-
-  const rafRef = useRef(null);
-  const lastCellRef = useRef(null);
-
-  const handleDragMove = () => {
-    if (!activeRole) return;
-
-    if (!rafRef.current) {
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = null;
-
-        // PERF FIX: throttle expensive DOM hit-testing
-        if (activeRole === "instance" || activeRole === "container") {
-          const pt = pointerRef.current;
-          if (pt?.x != null && pt?.y != null) {
-            const now = performance.now();
-            const last = lastHoverPtRef.current;
-            const moved = pt.x !== last.x || pt.y !== last.y;
-
-            // ~12.5fps throttle (80ms)
-            if (moved && now - lastHoverUpdateRef.current > 80) {
-              lastHoverUpdateRef.current = now;
-              lastHoverPtRef.current = { x: pt.x, y: pt.y };
-              hoveredPanelIdRef.current = getHoveredPanelId(pt);
-            }
-          }
-        }
-
-        if (!panelDragging) return;
-
-        const live = pointerRef.current;
-        if (typeof live?.x !== "number" || typeof live?.y !== "number") return;
-
-        const rc = getCellFromPointer(live.x, live.y);
-        const next = rc ? `cell-${rc.row}-${rc.col}` : null;
-
-        if (next !== lastCellRef.current) {
-          lastCellRef.current = next;
-          setPanelOverCellId(next);
-        }
-      });
-    }
-  };
-
-  const lastOverKeyRef = useRef("");
-
-  const handleDragOver = (event) => {
-    const activeRoleNow = event.active?.data?.current?.role;
-    const d = event.over?.data?.current ?? null;
-
-    if (DEBUG_DND && activeRoleNow === "instance") {
-      dlog("[OVER raw]", {
-        overId: event.over?.id ?? null,
-        overRole: d?.role ?? null,
-        overContainerId: d?.containerId ?? null,
-        overPanelId: d?.panelId ?? null,
-        pointer: pointerRef.current,
-      });
-    }
-
-    let safe = d;
-    if (activeRoleNow === "instance") {
-      const r = safe?.role;
-      const ok =
-        r === "instance" ||
-        (typeof r === "string" && r.startsWith("container:")) ||
-        r === "panel:drop";
-      safe = ok ? safe : null;
-    }
-
-    const key = safe
-      ? `${safe.role}|${safe.containerId ?? ""}|${safe.panelId ?? ""}`
-      : "";
-
-    if (key !== lastOverKeyRef.current) {
-      lastOverKeyRef.current = key;
-      setOverData(safe);
-    }
-
-    if (activeRoleNow === "panel") return;
-    handleDragOverProp?.(event);
-  };
-
-  const handleDragEnd = (event) => {
-    const { active } = event;
-    const data = active?.data?.current;
-
-    setActiveId(null);
-    setActiveRole(null);
-    setOverData(null);
-
-    if (!data) return;
-
-    if (data.role !== "panel") {
-      handleDragEndProp?.(event);
-      return;
-    }
-
-    const panel = visiblePanels.find((p) => p.id === active.id);
-    if (!panel) {
-      requestAnimationFrame(() => setPanelDragging(false));
-      setPanelOverCellId(null);
-      lastCellRef.current = null;
-      return;
-    }
-
-    const live = pointerRef.current;
-    const rc =
-      typeof live?.x === "number" && typeof live?.y === "number"
-        ? getCellFromPointer(live.x, live.y)
-        : null;
-
-    if (!rc) {
-      requestAnimationFrame(() => setPanelDragging(false));
-      setPanelOverCellId(null);
-      lastCellRef.current = null;
-      return;
-    }
-
-    const updated = sanitizePanelPlacement({ ...panel, row: rc.row, col: rc.col }, rows, cols);
-
-    dispatch(updatePanel(updated));
-    socket.emit("update_panel", { panel: updated, gridId });
-
-    pointerRef.current = { x: null, y: null };
-    setPanelOverCellId(null);
-    lastCellRef.current = null;
-    hoveredPanelIdRef.current = null;
-    requestAnimationFrame(() => setPanelDragging(false));
-  };
-
-  const handleDragCancel = (event) => {
-    setActiveId(null);
-    setActiveRole(null);
-    setOverData(null);
-
-    pointerRef.current = { x: null, y: null };
-
-    setPanelOverCellId(null);
-    hoveredPanelIdRef.current = null;
-    requestAnimationFrame(() => setPanelDragging(false));
-
-    const role = event.active?.data?.current?.role;
-    if (role !== "panel") handleDragCancelProp?.(event);
-  };
-
-  // ---- Grid resizing (unchanged) ----
+  // -----------------------------
+  // ✅ Coordinator owns: sensors, collisionDetection, pointer listeners, panel placement, drafts,
+  //    stack visibility + stack commits, native/cross-window logic, etc.
+  // -----------------------------
+  const {
+    sensors,
+    collisionDetection,
+    onDragStart,
+    onDragMove,
+    onDragOver,
+    onDragEnd,
+    onDragCancel,
+
+    activeId,
+    activeRole,
+    panelDragging,
+    panelOverCellId,
+
+    getWorkingContainers,
+    getWorkingPanels,
+
+    // ✅ stacks from coordinator (draft-aware)
+    getStacksByCell,
+    getStackForPanel,
+    setActivePanelInCell,
+    cyclePanelStack,
+
+    overPanelId,
+    overDataRef,
+    hotTarget,
+    isContainerDrag,
+    isInstanceDrag,
+  } = useDnDControlCoordinator({
+    state,
+    dispatch,
+    socket,
+    scheduleSoftTick,
+
+    // allow coordinator to compute cell math for panel placement
+    gridRef,
+    rows,
+    cols,
+    rowSizes,
+    colSizes,
+
+    visiblePanels,
+    // ✅ do NOT pass Grid-owned stacksByCell anymore
+  });
+
+  const containersRender = getWorkingContainers?.() ?? state?.containers ?? [];
+  const panelsRender = getWorkingPanels?.() ?? visiblePanels;
+
+  const panelsById = useMemo(() => {
+    const m = Object.create(null);
+    for (const p of panelsRender || []) m[p.id] = p;
+    return m;
+  }, [panelsRender]);
+
+  const getPanel = useCallback((id) => panelsRender.find((p) => p.id === id), [panelsRender]);
+
+  // ✅ stacksByCell for fullscreen/dropdowns (draft-aware)
+  const stacksByCell = useMemo(() => getStacksByCell?.() || {}, [getStacksByCell, dragTick]);
+
+  // -----------------------------
+  // ✅ Grid resizing commit
+  // -----------------------------
   const resizePendingRef = useRef({ rowSizes: null, colSizes: null });
 
   const finalizeResize = () => {
@@ -763,25 +393,15 @@ function GridInner({ components }) {
     if (!pending.rowSizes && !pending.colSizes) return;
     if (!state.grid?._id) return;
 
-    dispatch(
-      updateGrid({
-        _id: state.grid._id,
-        rows: state.grid.rows,
-        cols: state.grid.cols,
-        rowSizes: pending.rowSizes ?? rowSizes,
-        colSizes: pending.colSizes ?? colSizes,
-      })
-    );
+    const nextRowSizes = pending.rowSizes ?? rowSizes;
+    const nextColSizes = pending.colSizes ?? colSizes;
 
-    socket.emit("update_grid", {
+    CommitHelpers.updateGrid({
+      dispatch,
+      socket,
       gridId: state.grid._id,
-      grid: {
-        _id: state.grid._id,
-        rows: state.grid.rows,
-        cols: state.grid.cols,
-        rowSizes: pending.rowSizes ?? rowSizes,
-        colSizes: pending.colSizes ?? colSizes,
-      },
+      grid: { rowSizes: nextRowSizes, colSizes: nextColSizes },
+      emit: true,
     });
 
     resizePendingRef.current = { rowSizes: null, colSizes: null };
@@ -828,18 +448,6 @@ function GridInner({ components }) {
 
   const getClientX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
   const getClientY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
-
-  const getColPosition = (i) => {
-    const total = colSizes.reduce((a, b) => a + b, 0);
-    const before = colSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
-    return (before / total) * 100;
-  };
-
-  const getRowPosition = (i) => {
-    const total = rowSizes.reduce((a, b) => a + b, 0);
-    const before = rowSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
-    return (before / total) * 100;
-  };
 
   const startColResize = (e, i) => {
     e.preventDefault();
@@ -893,13 +501,28 @@ function GridInner({ components }) {
     window.addEventListener("touchend", stop);
   };
 
+  const getColPosition = (i) => {
+    const total = colSizes.reduce((a, b) => a + b, 0);
+    const before = colSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
+    return (before / total) * 100;
+  };
+
+  const getRowPosition = (i) => {
+    const total = rowSizes.reduce((a, b) => a + b, 0);
+    const before = rowSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
+    return (before / total) * 100;
+  };
+
+  const containersById = useMemo(() => {
+    const m = Object.create(null);
+    for (const c of containersRender || []) m[c.id] = c;
+    return m;
+  }, [containersRender]);
+
   const activeContainer = useMemo(() => {
     if (activeRole !== "container" || !activeId) return null;
-    const src = containersRender ?? state?.containers ?? [];
-    const m = Object.create(null);
-    for (const c of src) m[c.id] = c;
-    return m?.[activeId] || null;
-  }, [activeRole, activeId, containersRender, state?.containers]);
+    return containersById?.[activeId] || null;
+  }, [activeRole, activeId, containersById]);
 
   const InstanceComp = components["Instance"];
 
@@ -907,121 +530,162 @@ function GridInner({ components }) {
     if (activeRole !== "instance" || !activeId) return null;
     return instancesById?.[activeId] || null;
   }, [activeRole, activeId, instancesById]);
-  const containersById = useMemo(() => {
-    const m = Object.create(null);
-    const src = containersRender ?? state?.containers ?? [];
-    for (const c of src) m[c.id] = c;
-    return m;
-  }, [containersRender, state?.containers]);
+
   const panelProps = useMemo(
     () => ({
-      overData,
-      isContainerDrag,
-      isInstanceDrag,
       addContainerToPanel,
       addInstanceToContainer,
       instancesById,
-      // containersById is local in your snippet above; keep your existing wiring if different
       sizesRef,
-      containersById
+      containersById,
+
+      // ✅ injected (no context subscriptions) — Option B
+      overPanelId,
+      overDataRef,
+      hotTarget,
+      isContainerDrag,
+      isInstanceDrag,
+
+      // ✅ stack actions from coordinator
+      onSelectStackPanel: setActivePanelInCell,
+      onCycleStack: cyclePanelStack,
+
+      dispatch,
+      gridRef,
     }),
     [
-      overData,
-      isContainerDrag,
-      isInstanceDrag,
       addContainerToPanel,
       addInstanceToContainer,
       instancesById,
-      containersById
+      sizesRef,
+      containersById,
+
+      // ✅ injected deps
+      overPanelId,
+      overDataRef,
+      hotTarget,
+      isContainerDrag,
+      isInstanceDrag,
+
+      setActivePanelInCell,
+      cyclePanelStack,
+      dispatch,
     ]
   );
 
+
+  // If you want to hard-reset dnd when exiting fullscreen,
+  // let the coordinator decide; Grid no longer forces key resets.
+  const dndKey = 0;
+  const activeSize = state.activeSize;
+
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={collisionDetection}
-      measuring={{
-        droppable: {
-          strategy:
-            isContainerDrag || isInstanceDrag
-              ? MeasuringStrategy.WhileDragging
-              : MeasuringStrategy.BeforeDragging,
-        },
-      }}
-      autoScroll={{
-        enabled: true,
-        threshold: { x: 0.15, y: 0.15 },
-        acceleration: 25,
-      }}
-      onDragStart={handleDragStart}
-      onDragMove={handleDragMove}
-      onDragEnd={handleDragEnd}
-      onDragOver={handleDragOver}
-      onDragCancel={handleDragCancel}
-    >
-      <div
-        className="bg-background2 rounded-xl border border-border shadow-inner ring-1 ring-black/30"
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "#1D2125",
-          overflow: "hidden",
-          top: "20px",
+    <>
+      <DndContext
+        key={dndKey}
+        sensors={sensors}
+        collisionDetection={collisionDetection}
+        measuring={{
+          droppable: {
+            strategy:
+              activeRole === "container" || activeRole === "instance"
+                ? MeasuringStrategy.Always
+                : MeasuringStrategy.BeforeDragging,
+          },
         }}
+        autoScroll={{
+          enabled: true,
+          threshold: { x: 0.15, y: 0.15 },
+          acceleration: 25,
+        }}
+        onDragStart={onDragStart}
+        onDragMove={onDragMove}
+        onDragOver={onDragOver}
+        onDragEnd={onDragEnd}
+        onDragCancel={onDragCancel}
       >
-        <GridCanvas
-          gridRef={gridRef}
-          rows={rows}
-          cols={cols}
-          colTemplate={colTemplate}
-          rowTemplate={rowTemplate}
-          visiblePanels={visiblePanels}
-          activeId={activeId}
-          panelDragging={panelDragging}
+        <div
+          className={[
+            "bg-background2 rounded-xl border border-border shadow-inner ring-1 ring-black/30",
+            fullscreenPanelId ? "grid-muted" : "",
+          ].join(" ")}
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "#1D2125",
+            overflow: "hidden",
+            top: "20px",
+          }}
+        >
+          <GridCanvas
+            gridRef={gridRef}
+            rows={rows}
+            cols={cols}
+            colTemplate={colTemplate}
+            rowTemplate={rowTemplate}
+            visiblePanels={panelsRender}
+            activeId={activeId}
+            panelDragging={panelDragging}
+            components={components}
+            dispatch={dispatch}
+            socket={socket}
+            startColResize={startColResize}
+            startRowResize={startRowResize}
+            getColPosition={getColPosition}
+            getRowPosition={getRowPosition}
+            highlightCellId={panelOverCellId}
+            panelProps={panelProps}
+            activeRole={activeRole}
+            getStackForPanel={getStackForPanel}
+            fullscreenPanelId={fullscreenPanelId}
+            setFullscreenPanelId={setFullscreenPanelId}
+          />
+        </div>
+
+        <DragOverlay
+          modifiers={activeRole === "instance" ? [snapCenterToCursor] : []}
+          dropAnimation={null}
+          zIndex={1000005}
+          adjustScale={false}
+        >
+          {activeId && activeRole === "panel" && getPanel(activeId) ? (
+            <div className="panel-overlay" style={{ pointerEvents: "none" }}>
+              <PanelClone panel={getPanel(activeId)} />
+            </div>
+          ) : null}
+
+          {activeId && activeRole === "container" ? (
+            <div
+              className="container-overlay"
+              style={{
+                pointerEvents: "none",
+                width: activeSize?.width,
+                height: activeSize?.height,
+              }}
+            >
+              <ContainerClone container={activeContainer} />
+            </div>
+          ) : null}
+
+          {activeId && activeRole === "instance" && activeInstance ? (
+            <div className="instance-overlay" style={{ pointerEvents: "none" }}>
+              <InstanceComp id={activeInstance.id} label={activeInstance.label} overlay />
+            </div>
+          ) : null}
+        </DragOverlay>
+
+        {/* ✅ Fullscreen overlay is OUTSIDE the grid DOM + DnD overlays */}
+        <FullscreenOverlay
+          fullscreenPanelId={fullscreenPanelId}
+          setFullscreenPanelId={setFullscreenPanelId}
+          panelsById={panelsById}
           components={components}
-          dispatch={dispatch}
-          startColResize={startColResize}
-          startRowResize={startRowResize}
-          getColPosition={getColPosition}
-          getRowPosition={getRowPosition}
-          highlightCellId={panelOverCellId}
           panelProps={panelProps}
-          activeRole={activeRole}
+          cols={cols}
+          rows={rows}
         />
-      </div>
-
-      <DragOverlay
-        modifiers={activeRole === "instance" ? [snapCenterToCursor] : []}
-        dropAnimation={null}
-        zIndex={100000}
-        adjustScale={false}
-      >
-        {activeId && activeRole === "panel" && getPanel(activeId) ? (
-          <div className="panel-overlay" style={{ pointerEvents: "none" }}>
-            <PanelClone panel={getPanel(activeId)} />
-          </div>
-        ) : null}
-
-        {activeId && activeRole === "container" ? (
-          <div
-            className="container-overlay"
-            style={{
-              pointerEvents: "none",
-              width: state?.activeSize?.width,
-              height: state?.activeSize?.height,
-            }}
-          >
-            <ContainerClone container={activeContainer} />
-          </div>
-        ) : null}
-
-        {activeId && activeRole === "instance" && activeInstance ? (
-          <div className="instance-overlay" style={{ pointerEvents: "none" }}>
-            <InstanceComp id={activeInstance.id} label={activeInstance.label} overlay />
-          </div>
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+      </DndContext>
+    </>
   );
 }
 

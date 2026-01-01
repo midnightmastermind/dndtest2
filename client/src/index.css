@@ -473,10 +473,8 @@ html.dark {
 }
 
 /* Slight “pressed into dock” feel on hover */
-.instance-wrap:hover > * {
-  box-shadow:
-    0 4px 14px rgba(0,0,0,0.45),
-    0 1px 0 rgba(255,255,255,0.05) inset;
+.dragging .instance-wrap:hover > * {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.04) inset;
 }
 
 .instance-overlay > * {
@@ -492,7 +490,6 @@ html.dark {
 .panel-overlay,
 .container-overlay,
 .instance-overlay {
-  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.72));
   transform: translateZ(0); /* crisp text */
 }
 .instance-overlay {
@@ -550,4 +547,15 @@ html.dark {
 
   min-height: 120px;
   position: relative;
+}
+.fullscreen-overlay { pointer-events: auto; }
+.fullscreen-overlay * { pointer-events: auto; }
+.drag-overlay,
+.panel-clone-overlay {
+  pointer-events: none;
+}
+
+.grid-muted {
+  pointer-events: none;
+  user-select: none;
 }

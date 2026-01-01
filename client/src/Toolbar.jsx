@@ -24,14 +24,18 @@ export default function Toolbar({
   onUpdateCols,
   onAddPanel,
 }) {
-  const gridOptions = useMemo(
-    () =>
-      (availableGrids || []).map((g) => ({
-        value: g.id,
-        label: g.name || `Grid ${String(g.id).slice(-4)}`,
-      })),
-    [availableGrids]
-  );
+const gridOptions = useMemo(
+  () =>
+    (availableGrids || []).map((g) => {
+      const id = g.id || g._id;
+      const name = g.name || g.gridName || "";
+      return {
+        value: id,
+        label: name || `Grid ${String(id).slice(-4)}`,
+      };
+    }),
+  [availableGrids]
+);
 
   const formValue = {
     gridName: gridName || `Grid ${String(gridId || "").slice(-4)}`,
@@ -60,19 +64,21 @@ export default function Toolbar({
 
   return (
     <div
-      className="toolbar"
+      className="toolbar shadow-md"
       style={{
         position: "relative",
         zIndex: 998,
         flex: 1,
-        background: "#rgb(76, 84, 98)",
-        borderBottom: "1px solid #222",
+        backgroundColor: "rgb(56, 58, 60)",
+        borderBottom: "3px solid rgb(143, 150, 158)",
         padding: "1px 5px",
         fontSize: 12,
         fontFamily: "monospace",
-        color: "#9aa4b2",
         display: "flex",
         width: "100%",
+        marginBottom: "2px",
+        backgroundImage: "url('/banner.jpg')"
+
       }}
     >
       <div
@@ -87,6 +93,7 @@ export default function Toolbar({
       >
         {/* Left: + Grid + Grid Select */}
         <div style={{ display: "flex", alignItems: "end", gap: 6 }}>
+          <div className="site-name text-white bg-black pl-5 pr-5 opacity-75">+Moduli+</div>
           <ButtonPopover
             label={<Settings className="h-4 w-4" />}
             align="start"
@@ -96,7 +103,7 @@ export default function Toolbar({
             <GridLayoutForm
               value={formValue}
               onChange={onFormChange}
-              onCommitGridName={onCommitGridName}
+  onCommitGridName={(name) => onCommitGridName?.(name)}
               onDeleteGrid={onDeleteGrid}
               gridId={gridId}
             />
@@ -104,21 +111,21 @@ export default function Toolbar({
 
 
           <div style={{ minWidth: 130 }}>
-          <FormInput
-  schema={{
-    type: "select",
-    className: "flex content-end",
-    key: "gridId",
-    label: "Grid",
-    options: gridOptions,
-    placeholder: "Select grid…",
-  }}
-  value={{ gridId: gridId || "" }}
-  onChange={(next) => {
-    const val = next?.gridId ?? "";
-    onGridChange?.({ target: { value: val } });
-  }}
-/>
+            <FormInput
+              schema={{
+                type: "select",
+                className: "flex content-end",
+                key: "gridId",
+                label: "",
+                options: gridOptions,
+                placeholder: "Select grid…",
+              }}
+              value={{ gridId: gridId || "" }}
+              onChange={(next) => {
+                const val = next?.gridId ?? "";
+                onGridChange?.({ target: { value: val } });
+              }}
+            />
           </div>
           <Button
             size="sm"
@@ -143,3 +150,6 @@ export default function Toolbar({
     </div>
   );
 }
+
+
+

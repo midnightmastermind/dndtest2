@@ -105,31 +105,30 @@ export function masterReducer(state, action) {
         }
 
         case ActionTypes.UPDATE_GRID: {
-            const gridId =
-                action.payload?.gridId ||
-                action.payload?.grid?._id ||
-                action.payload?.grid?.id ||
-                state.gridId;
+            const { gridId, grid } = action.payload || {};
+            if (!gridId || !grid) return state;
 
-            const patch =
-                action.payload?.grid ?? action.payload?.gridPatch ?? action.payload ?? null;
+            // only apply patch to the currently active grid
+            const activeId = state.gridId || state.grid?._id;
+            if (activeId && gridId !== activeId) {
+                // still update dropdown list name if present
+                const nextAvailable = (state.availableGrids || []).map((g) =>
+                    (g.id || g._id) === gridId ? { ...g, ...grid } : g
+                );
+                return { ...state, availableGrids: nextAvailable };
+            }
 
-            if (!patch) return state;
+            // merge patch into grid
+            const nextGrid = { ...(state.grid || {}), ...grid };
 
-            const nextGrid = { ...(state.grid || {}), ...patch };
-
+            // also keep dropdown list in sync
             const nextAvailable = (state.availableGrids || []).map((g) =>
-                g.id === gridId
-                    ? { ...g, name: patch.name ?? g.name }
-                    : g
+                (g.id || g._id) === gridId ? { ...g, ...grid } : g
             );
 
-            return {
-                ...state,
-                grid: nextGrid,
-                availableGrids: nextAvailable,
-            };
+            return { ...state, grid: nextGrid, availableGrids: nextAvailable };
         }
+
 
 
         case ActionTypes.DELETE_GRID: {

@@ -22,7 +22,6 @@ export default function GridLayoutForm({
 
       <FormInput
         schema={{
-          className: "",
           type: "text-input",
           key: "gridName",
           label: "Grid Name",
@@ -30,14 +29,19 @@ export default function GridLayoutForm({
           onKeyDown: (e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              onCommitGridName?.();
+              onCommitGridName?.(e.currentTarget.value); // ✅ use real input value
               e.currentTarget.blur();
             }
+          },
+          onBlur: (e) => {
+            onCommitGridName?.(e.currentTarget.value); // ✅ use real input value
           },
         }}
         value={value}
         onChange={onChange}
       />
+
+
       <Separator />
 
       <div className="pt-2">
