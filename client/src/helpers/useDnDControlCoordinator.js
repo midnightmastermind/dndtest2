@@ -1,15 +1,6 @@
 // helpers/useDnDControlCoordinator.js
 //
 // ✅ Unified Drag-and-Drop Control Coordinator (condensed + uniform)
-// Goals:
-// - ONE active object ref: activeRef.current = { id, role, data }
-// - ONE over object ref:   overRef.current   = { id, role, panelId, containerId, ... }
-// - Draft-aware preview during drag (no backend commits until drop)
-// - Panel stacking helpers live here (Grid is dumb)
-// - Cross-window: keeps the messaging hooks in place (native drag is separate)
-//
-// NOTE: "true cursor drag across windows" still requires native drag events on handles.
-// This coordinator keeps the payload + commit path centralized.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,47 +15,99 @@ import {
 import * as CommitHelpers from "./CommitHelpers";
 import * as LayoutHelpers from "./LayoutHelpers";
 
-// -----------------------------
+// ============================================================
+// 🔧 PERFORMANCE FLAGS
+// ============================================================
+const ENABLE_INSTANCE_PREVIEW_SORT = true;
+const ENABLE_CONTAINER_PREVIEW_SORT = true;
+
+// ============================================================
 // tiny utils
-// -----------------------------
+// ============================================================
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-function arrayMove(arr, from, to) {
-  const copy = [...arr];
-  const [item] = copy.splice(from, 1);
-  copy.splice(to, 0, item);
-  return copy;
-}
-
 function deepClonePanels(panels = []) {
-  return (panels || []).map((p) => ({ ...p, layout: p.layout ? { ...p.layout } : p.layout }));
+  return panels.map((p) => ({
+    ...p,
+    layout: p.layout ? { ...p.layout } : p.layout,
+    containers: [...(p.containers || [])],
+  }));
 }
 
 function deepCloneContainers(containers = []) {
-  return (containers || []).map((c) => ({ ...c, items: [...(c.items || [])] }));
+  return containers.map((c) => ({
+    ...c,
+    items: [...(c.items || [])],
+  }));
 }
 
-function pickRole(dataCurrent) {
-  const role = dataCurrent?.role;
-  return typeof role === "string" ? role : String(role ?? "");
+function pickRole(data) {
+  const r = data?.role;
+  return typeof r === "string" ? r : String(r ?? "");
 }
 
 function cellKeyFromPanel(p) {
   return `cell-${p.row}-${p.col}`;
 }
 
-// -----------------------------
-// main hook
-// -----------------------------
+// ============================================================
+// PREVIEW MUTATION HELPERS (DRAFT ONLY)
+// ============================================================
+function previewMoveInstance({
+  draftContainers,
+  instanceId,
+  fromContainerId,
+  toContainerId,
+  toIndex,
+}) {
+  if (!draftContainers) return;
+
+  const from = draftContainers.find((c) => c.id === fromContainerId);
+  const to = draftContainers.find((c) => c.id === toContainerId);
+  if (!from || !to) return;
+
+  from.items = from.items.filter((id) => id !== instanceId);
+
+  if (toIndex == null || toIndex < 0) {
+    to.items.push(instanceId);
+  } else {
+    to.items.splice(toIndex, 0, instanceId);
+  }
+}
+
+function previewMoveContainer({
+  draftPanels,
+  containerId,
+  fromPanelId,
+  toPanelId,
+  toIndex,
+}) {
+  if (!draftPanels) return;
+
+  const from = draftPanels.find((p) => p.id === fromPanelId);
+  const to = draftPanels.find((p) => p.id === toPanelId);
+  if (!from || !to) return;
+
+  from.containers = from.containers.filter((id) => id !== containerId);
+
+  if (toIndex == null || toIndex < 0) {
+    to.containers.push(containerId);
+  } else {
+    to.containers.splice(toIndex, 0, containerId);
+  }
+}
+
+// ============================================================
+// MAIN HOOK
+// ============================================================
 export function useDnDControlCoordinator({
   state,
   dispatch,
   socket,
   scheduleSoftTick,
 
-  // geometry inputs
   gridRef,
   rows,
   cols,
@@ -74,50 +117,46 @@ export function useDnDControlCoordinator({
   visiblePanels,
 }) {
   // ============================================================
-  // ✅ ONLY render-driving state
+  // render-driving state
   // ============================================================
   const [activeId, setActiveId] = useState(null);
-  const [activeRole, setActiveRole] = useState(null); // "panel" | "container" | "instance"
-  const [panelOverCellId, setPanelOverCellId] = useState(null); // only matters for panel drag
+  const [activeRole, setActiveRole] = useState(null);
+  const [panelOverCellId, setPanelOverCellId] = useState(null);
 
   const panelDragging = activeRole === "panel";
   const isContainerDrag = activeRole === "container";
   const isInstanceDrag = activeRole === "instance";
 
   // ============================================================
-  // ✅ ONE active object ref + ONE over object ref (uniform)
+  // refs
   // ============================================================
-  const activeRef = useRef(null); // { id, role, data }
-  const overRef = useRef(null);   // { id, role, panelId, containerId, ... } (always normalized)
-
-  // pointer ref (no rerenders)
+  const activeRef = useRef(null);
+  const overRef = useRef(null);
   const pointerRef = useRef({ x: 0, y: 0 });
 
-  // draft session ref (preview state while dragging)
   const sessionRef = useRef({
     dragging: false,
-    // snapshots captured at drag start
     startPanels: null,
     startContainers: null,
-    // draft versions we mutate during drag
     draftPanels: null,
     draftContainers: null,
   });
 
   // ============================================================
-  // ✅ Panels / containers base sources
+  // base sources
   // ============================================================
-  const basePanels = useMemo(() => {
-    // visiblePanels is already filtered by gridId in GridInner
-    return Array.isArray(visiblePanels) ? visiblePanels : [];
-  }, [visiblePanels]);
+  const basePanels = useMemo(
+    () => (Array.isArray(visiblePanels) ? visiblePanels : []),
+    [visiblePanels]
+  );
 
-  const baseContainers = useMemo(() => {
-    return Array.isArray(state?.containers) ? state.containers : [];
-  }, [state?.containers]);
+  const baseContainers = useMemo(
+    () => (Array.isArray(state?.containers) ? state.containers : []),
+    [state?.containers]
+  );
 
   // ============================================================
-  // ✅ Working data getters (draft-aware)
+  // draft-aware getters
   // ============================================================
   const getWorkingPanels = useCallback(() => {
     const s = sessionRef.current;
@@ -126,11 +165,13 @@ export function useDnDControlCoordinator({
 
   const getWorkingContainers = useCallback(() => {
     const s = sessionRef.current;
-    return s.dragging && s.draftContainers ? s.draftContainers : baseContainers;
+    return s.dragging && s.draftContainers
+      ? s.draftContainers
+      : baseContainers;
   }, [baseContainers]);
 
   // ============================================================
-  // ✅ Geometry: pointer -> cell
+  // geometry
   // ============================================================
   const getCellFromPointer = useCallback(() => {
     const el = gridRef?.current;
@@ -138,92 +179,57 @@ export function useDnDControlCoordinator({
 
     const { x, y } = pointerRef.current;
     const rect = el.getBoundingClientRect();
+
     const relX = (x - rect.left) / rect.width;
     const relY = (y - rect.top) / rect.height;
 
-    const totalCols = (colSizes || []).reduce((a, b) => a + b, 0) || 1;
-    const totalRows = (rowSizes || []).reduce((a, b) => a + b, 0) || 1;
+    const totalCols = colSizes.reduce((a, b) => a + b, 0) || 1;
+    const totalRows = rowSizes.reduce((a, b) => a + b, 0) || 1;
 
-    // walk fractional tracks
     let acc = 0;
     let col = 0;
-    for (let i = 0; i < (colSizes || []).length; i++) {
+    for (let i = 0; i < colSizes.length; i++) {
       acc += colSizes[i];
-      if (relX < acc / totalCols) { col = i; break; }
+      if (relX < acc / totalCols) break;
       col = i;
     }
 
     acc = 0;
     let row = 0;
-    for (let i = 0; i < (rowSizes || []).length; i++) {
+    for (let i = 0; i < rowSizes.length; i++) {
       acc += rowSizes[i];
-      if (relY < acc / totalRows) { row = i; break; }
+      if (relY < acc / totalRows) break;
       row = i;
     }
 
-    row = clamp(row, 0, rows - 1);
-    col = clamp(col, 0, cols - 1);
-    return { row, col, cellId: `cell-${row}-${col}` };
-  }, [gridRef, rowSizes, colSizes, rows, cols]);
+    return {
+      row: clamp(row, 0, rows - 1),
+      col: clamp(col, 0, cols - 1),
+      cellId: `cell-${row}-${col}`,
+    };
+  }, [gridRef, rows, cols, rowSizes, colSizes]);
 
   // ============================================================
-  // ✅ Normalize "over" into ONE uniform object
+  // hover normalization
   // ============================================================
-  const setOverFromDndKit = useCallback((overContainer) => {
-    if (!overContainer) {
+  const setOverFromDndKit = useCallback((over) => {
+    if (!over) {
       overRef.current = null;
       return;
     }
 
-    const data = overContainer?.data?.current || {};
-    const role = pickRole(data);
-
-    // Normalize into a compact, uniform shape that the whole app understands.
-    // You can safely extend this once, globally, without making more refs.
+    const data = over.data?.current || {};
     overRef.current = {
-      id: overContainer.id,
-      role,
+      id: over.id,
+      role: pickRole(data),
       panelId: data.panelId ?? null,
       containerId: data.containerId ?? null,
-
-      // optional extras for sorting scenarios
       overInstanceId: data.instanceId ?? data.overInstanceId ?? null,
-      row: data.row ?? null,
-      col: data.col ?? null,
-
-      // keep raw for debugging if you want
-      // raw: data,
     };
   }, []);
 
   // ============================================================
-  // ✅ Hot target derived from ONE overRef (no extra refs)
-  // ============================================================
-  const getHotTarget = useCallback(() => {
-    const o = overRef.current;
-    if (!o) return null;
-
-    // During instance drag, we usually want to highlight the container target.
-    if (activeRef.current?.role === "instance") {
-      if (o.role === "container:list" || o.role?.startsWith("instance:") || o.role?.startsWith("container:")) {
-        return { role: o.role, panelId: o.panelId, containerId: o.containerId };
-      }
-    }
-
-    // During container drag, highlight the panel dropzone or container sorting target.
-    if (activeRef.current?.role === "container") {
-      if (o.role === "panel:drop" || o.role?.startsWith("container:")) {
-        return { role: o.role, panelId: o.panelId, containerId: o.containerId };
-      }
-    }
-
-    return { role: o.role, panelId: o.panelId, containerId: o.containerId };
-  }, []);
-
-  const overPanelId = overRef.current?.panelId ?? null;
-
-  // ============================================================
-  // ✅ Draft mutation helpers (preview without commit)
+  // drag session
   // ============================================================
   const ensureDragSession = useCallback(() => {
     const s = sessionRef.current;
@@ -246,88 +252,12 @@ export function useDnDControlCoordinator({
 
     activeRef.current = null;
     overRef.current = null;
-
     setPanelOverCellId(null);
-    scheduleSoftTick?.(); // let Grid recompute stacks etc
+    scheduleSoftTick?.();
   }, [scheduleSoftTick]);
 
   // ============================================================
-  // ✅ Stack helpers (draft-aware)
-  // ============================================================
-  const getStacksByCell = useCallback(() => {
-    const panels = getWorkingPanels();
-    const map = Object.create(null);
-
-    for (const p of panels || []) {
-      const key = cellKeyFromPanel(p);
-      if (!map[key]) map[key] = [];
-      map[key].push(p);
-    }
-
-    // stable order: name or id (or keep insertion)
-    for (const k of Object.keys(map)) {
-      map[k].sort((a, b) => {
-        const an = (a?.layout?.name || "").toLowerCase();
-        const bn = (b?.layout?.name || "").toLowerCase();
-        if (an && bn && an !== bn) return an.localeCompare(bn);
-        return String(a.id).localeCompare(String(b.id));
-      });
-    }
-
-    return map;
-  }, [getWorkingPanels]);
-
-  const getStackForPanel = useCallback(
-    (panel) => {
-      if (!panel) return null;
-      const stacks = getStacksByCell();
-      return stacks[cellKeyFromPanel(panel)] || null;
-    },
-    [getStacksByCell]
-  );
-
-  // Visible panel in a cell is the one with layout.style.display !== "none".
-  // We commit stacking changes HARD because they are user-driven visibility state.
-  const setActivePanelInCell = useCallback(
-    (row, col, nextPanelId) => {
-      const panels = getWorkingPanels();
-      const cellPanels = (panels || []).filter((p) => p.row === row && p.col === col);
-      if (cellPanels.length <= 1) return;
-
-      for (const p of cellPanels) {
-        const display = p.id === nextPanelId ? "block" : "none";
-        LayoutHelpers.setPanelStackDisplay({
-          dispatch,
-          socket,
-          panel: p,
-          display,
-        });
-      }
-      scheduleSoftTick?.();
-    },
-    [getWorkingPanels, dispatch, socket, scheduleSoftTick]
-  );
-
-  const cyclePanelStack = useCallback(
-    ({ panelId, dir }) => {
-      const panels = getWorkingPanels();
-      const p = (panels || []).find((x) => x.id === panelId);
-      if (!p) return;
-
-      const stack = getStackForPanel(p) || [];
-      if (stack.length <= 1) return;
-
-      const idx = stack.findIndex((x) => x.id === panelId);
-      const nextIdx = (idx + (dir > 0 ? 1 : -1) + stack.length) % stack.length;
-      const next = stack[nextIdx];
-
-      setActivePanelInCell(p.row, p.col, next.id);
-    },
-    [getWorkingPanels, getStackForPanel, setActivePanelInCell]
-  );
-
-  // ============================================================
-  // ✅ Sensors (keep simple)
+  // sensors
   // ============================================================
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -335,93 +265,94 @@ export function useDnDControlCoordinator({
   );
 
   // ============================================================
-  // ✅ collisionDetection (role-aware, but no role-specific refs)
+  // collision detection
   // ============================================================
-  const collisionDetection = useMemo(() => {
-    return (args) => {
-      const role = activeRef.current?.role;
-
-      // Panels don't collide with container/instance droppables.
-      // We drive panel drop with pointer->cell.
-      if (role === "panel") {
+  const collisionDetection = useMemo(
+    () => (args) => {
+      if (activeRef.current?.role === "panel") {
         return panelOverCellId ? [{ id: panelOverCellId }] : [];
       }
 
-      // Containers + instances: prefer pointerWithin
       const raw = pointerWithin(args);
+      const filtered = raw.filter(
+        (c) =>
+          pickRole(c?.data?.droppableContainer?.data?.current) !==
+          "panel:drop"
+      );
 
-      // Filter out panel:drop when dragging sortable items so closestCenter can work in gaps.
-      const getMeta = (c) => c?.data?.droppableContainer?.data?.current || null;
-      const shouldScope = role === "container" || role === "instance";
-
-      const hits = shouldScope
-        ? raw.filter((c) => pickRole(getMeta(c)) !== "panel:drop")
-        : raw;
-
-      if (hits.length) return hits;
-
-      // fallback
-      return closestCenter(args);
-    };
-  }, [panelOverCellId]);
+      return filtered.length ? filtered : closestCenter(args);
+    },
+    [panelOverCellId]
+  );
 
   // ============================================================
-  // ✅ DnD handlers
+  // handlers
   // ============================================================
   const onDragStart = useCallback(
     (evt) => {
-      const id = evt?.active?.id ?? null;
-      const data = evt?.active?.data?.current ?? {};
-      const role = pickRole(data);
+      const data = evt.active.data?.current ?? {};
+      activeRef.current = {
+        id: evt.active.id,
+        role: pickRole(data),
+        data,
+      };
 
-      activeRef.current = { id, role, data };
-      setActiveId(id);
-      setActiveRole(role);
-
+      setActiveId(evt.active.id);
+      setActiveRole(activeRef.current.role);
       ensureDragSession();
-
-      // for panel drag, prime the cell highlight
-      if (role === "panel") {
-        const cell = getCellFromPointer();
-        setPanelOverCellId(cell?.cellId ?? null);
-      }
-
       scheduleSoftTick?.();
     },
-    [ensureDragSession, getCellFromPointer, scheduleSoftTick]
-  );
-
-  const onDragMove = useCallback(
-    (evt) => {
-      // capture pointer
-      const x = evt?.delta?.x;
-      // dnd-kit doesn't give absolute pointer here; use window listener below instead.
-      // We still keep this hook for panel cell updates if needed.
-      if (activeRef.current?.role === "panel") {
-        const cell = getCellFromPointer();
-        const next = cell?.cellId ?? null;
-        setPanelOverCellId((prev) => (prev === next ? prev : next));
-      }
-    },
-    [getCellFromPointer]
+    [ensureDragSession, scheduleSoftTick]
   );
 
   const onDragOver = useCallback(
     (evt) => {
-      // One place where hover updates are stored.
-      setOverFromDndKit(evt?.over);
+      setOverFromDndKit(evt.over);
 
-      // OPTIONAL: draft previews can be updated here if you want live reorder preview.
-      // Keep it conservative: only do container reorder previews; instances already sortable inside container.
-      const role = activeRef.current?.role;
+      const a = activeRef.current;
+      const o = overRef.current;
+      const s = sessionRef.current;
 
-      if (role === "container") {
-        const o = overRef.current;
-        if (!o) return;
+      if (!a || !o) return;
 
-        // If over a container sorting target, preview reorder within the panel.
-        // Your SortableContext is in Panel; dnd-kit will animate visually anyway.
-        // We only need drafts if you want "phantom insertion" before drop.
+      // INSTANCE PREVIEW SORT
+      if (
+        ENABLE_INSTANCE_PREVIEW_SORT &&
+        a.role === "instance" &&
+        o.containerId &&
+        a.data?.containerId &&
+        s.draftContainers
+      ) {
+        const to = s.draftContainers.find((c) => c.id === o.containerId);
+        const idx =
+          o.overInstanceId && to
+            ? to.items.indexOf(o.overInstanceId)
+            : null;
+
+        previewMoveInstance({
+          draftContainers: s.draftContainers,
+          instanceId: a.id,
+          fromContainerId: a.data.containerId,
+          toContainerId: o.containerId,
+          toIndex: idx,
+        });
+      }
+
+      // CONTAINER PREVIEW SORT
+      if (
+        ENABLE_CONTAINER_PREVIEW_SORT &&
+        a.role === "container" &&
+        o.panelId &&
+        a.data?.panelId &&
+        s.draftPanels
+      ) {
+        previewMoveContainer({
+          draftPanels: s.draftPanels,
+          containerId: a.id,
+          fromPanelId: a.data.panelId,
+          toPanelId: o.panelId,
+          toIndex: null,
+        });
       }
 
       scheduleSoftTick?.();
@@ -429,150 +360,86 @@ export function useDnDControlCoordinator({
     [setOverFromDndKit, scheduleSoftTick]
   );
 
-  const onDragCancel = useCallback(() => {
+  const onDragEnd = useCallback(() => {
+    const a = activeRef.current;
+    const o = overRef.current;
+
+    if (!a) return clearDragSession();
+
+    if (a.role === "panel") {
+      const cell = getCellFromPointer();
+      if (cell) {
+        const p = getWorkingPanels().find((x) => x.id === a.id);
+        if (p) {
+          CommitHelpers.updatePanel({
+            dispatch,
+            socket,
+            panel: { ...p, row: cell.row, col: cell.col },
+            emit: true,
+          });
+        }
+      }
+    }
+
+    if (a.role === "container" && o?.panelId) {
+      LayoutHelpers.moveContainerBetweenPanels({
+        dispatch,
+        socket,
+        fromPanel: getWorkingPanels().find(
+          (p) => p.id === a.data.panelId
+        ),
+        toPanel: getWorkingPanels().find((p) => p.id === o.panelId),
+        containerId: a.id,
+      });
+    }
+
+    if (a.role === "instance" && o?.containerId) {
+      LayoutHelpers.moveInstanceBetweenContainers({
+        dispatch,
+        socket,
+        fromContainer: getWorkingContainers().find(
+          (c) => c.id === a.data.containerId
+        ),
+        toContainer: getWorkingContainers().find(
+          (c) => c.id === o.containerId
+        ),
+        instanceId: a.id,
+      });
+    }
+
     clearDragSession();
     setActiveId(null);
     setActiveRole(null);
-  }, [clearDragSession]);
-
-  const onDragEnd = useCallback(
-    (evt) => {
-      const a = activeRef.current; // {id, role, data}
-      const o = overRef.current;   // normalized over object
-      if (!a?.id || !a?.role) {
-        clearDragSession();
-        setActiveId(null);
-        setActiveRole(null);
-        return;
-      }
-
-      // ========= PANEL DROP =========
-      if (a.role === "panel") {
-        const cell = getCellFromPointer();
-        const row = cell?.row ?? null;
-        const col = cell?.col ?? null;
-
-        if (row != null && col != null) {
-          const panels = getWorkingPanels();
-          const panel = (panels || []).find((p) => p.id === a.id);
-          if (panel) {
-            // Commit panel position
-            CommitHelpers.updatePanel({
-              dispatch,
-              socket,
-              panel: { ...panel, row, col },
-              emit: true,
-            });
-          }
-        }
-
-        clearDragSession();
-        setActiveId(null);
-        setActiveRole(null);
-        return;
-      }
-
-      // ========= CONTAINER DROP =========
-      if (a.role === "container") {
-        // Typical cases:
-        // - reorder within same panel (SortableContext handles array move)
-        // - move container to a different panel (panel:drop)
-        //
-        // Your app likely stores container IDs in panel.containers.
-        // We'll handle cross-panel move on "panel:drop".
-        if (o?.role === "panel:drop" && o.panelId) {
-          const containerId = a.id;
-          const fromPanelId = a.data?.panelId ?? null;
-          const toPanelId = o.panelId;
-
-          if (fromPanelId && toPanelId && fromPanelId !== toPanelId) {
-            const panels = getWorkingPanels();
-            const fromPanel = (panels || []).find((p) => p.id === fromPanelId);
-            const toPanel = (panels || []).find((p) => p.id === toPanelId);
-
-            if (fromPanel && toPanel) {
-              // Remove from old, add to new (hard commit)
-              LayoutHelpers.moveContainerBetweenPanels({
-                dispatch,
-                socket,
-                fromPanel,
-                toPanel,
-                containerId,
-              });
-            }
-          }
-        }
-
-        clearDragSession();
-        setActiveId(null);
-        setActiveRole(null);
-        return;
-      }
-
-      // ========= INSTANCE DROP =========
-      if (a.role === "instance") {
-        // Typical: dropping onto container:list
-        if (o?.role === "container:list" && o.containerId) {
-          const instanceId = a.id;
-          const fromContainerId = a.data?.containerId ?? null;
-          const toContainerId = o.containerId;
-
-          if (fromContainerId && toContainerId && fromContainerId !== toContainerId) {
-            const containers = getWorkingContainers();
-            const fromC = (containers || []).find((c) => c.id === fromContainerId);
-            const toC = (containers || []).find((c) => c.id === toContainerId);
-
-            if (fromC && toC) {
-              LayoutHelpers.moveInstanceBetweenContainers({
-                dispatch,
-                socket,
-                fromContainer: fromC,
-                toContainer: toC,
-                instanceId,
-              });
-            }
-          }
-        }
-
-        clearDragSession();
-        setActiveId(null);
-        setActiveRole(null);
-        return;
-      }
-
-      clearDragSession();
-      setActiveId(null);
-      setActiveRole(null);
-    },
-    [
-      dispatch,
-      socket,
-      getCellFromPointer,
-      getWorkingPanels,
-      getWorkingContainers,
-      clearDragSession,
-    ]
-  );
+  }, [
+    dispatch,
+    socket,
+    getCellFromPointer,
+    getWorkingPanels,
+    getWorkingContainers,
+    clearDragSession,
+  ]);
 
   // ============================================================
-  // ✅ Pointer tracking (absolute), used by getCellFromPointer
+  // pointer tracking
   // ============================================================
   useEffect(() => {
     const onMove = (e) => {
-      const x = e?.clientX ?? e?.touches?.[0]?.clientX;
-      const y = e?.clientY ?? e?.touches?.[0]?.clientY;
+      const x = e.clientX ?? e.touches?.[0]?.clientX;
+      const y = e.clientY ?? e.touches?.[0]?.clientY;
+
       if (typeof x === "number" && typeof y === "number") {
         pointerRef.current = { x, y };
+
         if (activeRef.current?.role === "panel") {
           const cell = getCellFromPointer();
-          const next = cell?.cellId ?? null;
-          setPanelOverCellId((prev) => (prev === next ? prev : next));
+          setPanelOverCellId(cell?.cellId ?? null);
         }
       }
     };
 
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("touchmove", onMove, { passive: true });
+
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("touchmove", onMove);
@@ -580,42 +447,15 @@ export function useDnDControlCoordinator({
   }, [getCellFromPointer]);
 
   // ============================================================
-  // ✅ Cross-window scaffolding (kept centralized, minimal)
+  // public api
   // ============================================================
-  // This does NOT create native drags — it just provides the shared lane.
-  // You still wire native dragstart/dragend on handles when you’re ready.
-  const bcRef = useRef(null);
-  const externalDragRef = useRef(null);
-
-  useEffect(() => {
-    try {
-      bcRef.current = new BroadcastChannel("grid-dnd");
-      bcRef.current.onmessage = (ev) => {
-        externalDragRef.current = ev?.data ?? null;
-      };
-      return () => {
-        bcRef.current?.close?.();
-        bcRef.current = null;
-      };
-    } catch {
-      // BroadcastChannel not available; noop
-    }
-  }, []);
-
-  // ============================================================
-  // ✅ Return API
-  // ============================================================
-  // NOTE: We only pass ONE over ref and derive everything else.
-  const hotTarget = getHotTarget();
-
   return {
     sensors,
     collisionDetection,
     onDragStart,
-    onDragMove,
     onDragOver,
     onDragEnd,
-    onDragCancel,
+    onDragCancel: clearDragSession,
 
     activeId,
     activeRole,
@@ -625,27 +465,11 @@ export function useDnDControlCoordinator({
     getWorkingPanels,
     getWorkingContainers,
 
-    // stacks (draft-aware)
-    getStacksByCell,
-    getStackForPanel,
-    setActivePanelInCell,
-    cyclePanelStack,
-
-    // unified hover outputs
-    overPanelId,
-    overDataRef: overRef,
-    hotTarget,
-
     isContainerDrag,
     isInstanceDrag,
 
-    // unified refs for debugging / advanced integrations
     activeRef,
     overRef,
     pointerRef,
-
-    // cross-window lane
-    bcRef,
-    externalDragRef,
   };
 }

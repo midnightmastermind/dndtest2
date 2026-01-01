@@ -35,12 +35,6 @@ function sameIdList(a = [], b = []) {
   return true;
 }
 
-function pickOverKey(overData) {
-  if (!overData) return "";
-  const role =
-    typeof overData.role === "string" ? overData.role : String(overData.role ?? "");
-  return `${role}|${overData.panelId ?? ""}|${overData.containerId ?? ""}`;
-}
 
 /* ------------------------------------------------------------
    ✅ Layout defaults + merge (back-compat safe)
@@ -129,9 +123,6 @@ function Panel({
   cols,
   rows,
 
-  // ✅ injected (no context subscriptions)
-  overPanelId,
-  overDataRef,
   hotTarget,
   isContainerDrag,
   isInstanceDrag,
@@ -154,7 +145,6 @@ function Panel({
   // ----------------------------------------------------------
   const layout = useMemo(() => mergeLayout(panel?.layout), [panel?.layout]);
   const layoutSaveTimer = useRef(null);
-  const overData = overPanelId === panel.id ? overDataRef.current : null;
 
   useEffect(() => {
     return () => window.clearTimeout(layoutSaveTimer.current);
@@ -165,78 +155,78 @@ function Panel({
    * - cancels pending debounce
    * - writes reducer + emits once
    */
-const commitPanelLayout = useCallback(
-  (nextLayout) => {
-    if (!panel) return;
+  const commitPanelLayout = useCallback(
+    (nextLayout) => {
+      if (!panel) return;
 
-    const curr = panel.layout || {};
-    const currStyle = curr?.style || {};
-    const incoming = nextLayout || {};
-    const incomingStyle = incoming?.style || {};
+      const curr = panel.layout || {};
+      const currStyle = curr?.style || {};
+      const incoming = nextLayout || {};
+      const incomingStyle = incoming?.style || {};
 
-    const preservedStyle = {
-      ...currStyle,
-      ...incomingStyle,
-      display: incomingStyle.display ?? (currStyle.display ?? "block"),
-    };
+      const preservedStyle = {
+        ...currStyle,
+        ...incomingStyle,
+        display: incomingStyle.display ?? (currStyle.display ?? "block"),
+      };
 
-    const merged = mergeLayout({
-      ...curr,
-      ...incoming,
-      style: preservedStyle,
-    });
+      const merged = mergeLayout({
+        ...curr,
+        ...incoming,
+        style: preservedStyle,
+      });
 
-    const nextPanel = { ...panel, layout: merged };
+      const nextPanel = { ...panel, layout: merged };
 
-    // ✅ Cancel any pending debounce
-    window.clearTimeout(layoutSaveTimer.current);
+      // ✅ Cancel any pending debounce
+      window.clearTimeout(layoutSaveTimer.current);
 
-    // ✅ Immediate commit via CommitHelpers (does dispatch + emit)
-    CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel });
-  },
-  [panel, socket, dispatch]
-);
+      // ✅ Immediate commit via CommitHelpers (does dispatch + emit)
+      CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel });
+    },
+    [panel, socket, dispatch]
+  );
 
   /**
    * ✅ Debounced setLayout (sliders / continuous changes)
    * - writes reducer immediately (optimistic)
    * - emits after 150ms pause
    */
-const setLayout = useCallback(
-  (nextLayout) => {
-    if (!panel) return;
+  const setLayout = useCallback(
+    (nextLayout) => {
+      if (!panel) return;
 
-    const curr = panel.layout || {};
-    const currStyle = curr?.style || {};
-    const incoming = nextLayout || {};
-    const incomingStyle = incoming?.style || {};
+      const curr = panel.layout || {};
+      const currStyle = curr?.style || {};
+      const incoming = nextLayout || {};
+      const incomingStyle = incoming?.style || {};
 
-    const preservedStyle = {
-      ...currStyle,
-      ...incomingStyle,
-      display: incomingStyle.display ?? (currStyle.display ?? "block"),
-    };
+      const preservedStyle = {
+        ...currStyle,
+        ...incomingStyle,
+        display: incomingStyle.display ?? (currStyle.display ?? "block"),
+      };
 
-    const merged = mergeLayout({
-      ...curr,
-      ...incoming,
-      style: preservedStyle,
-    });
+      const merged = mergeLayout({
+        ...curr,
+        ...incoming,
+        style: preservedStyle,
+      });
 
-    const nextPanel = { ...panel, layout: merged };
+      const nextPanel = { ...panel, layout: merged };
 
-    CommitHelpers.updatePanel({ dispatch, socket: null, panel: nextPanel });
+      CommitHelpers.updatePanel({ dispatch, socket: null, panel: nextPanel });
 
-    // ✅ Cancel any previous timer
-    window.clearTimeout(layoutSaveTimer.current);
+      // ✅ Cancel any previous timer
+      window.clearTimeout(layoutSaveTimer.current);
 
-    // ✅ Debounced commit via CommitHelpers (does dispatch + emit internally)
-    layoutSaveTimer.current = window.setTimeout(() => {
-      CommitHelpers.updatePanel({ dispatch: null, socket, panel: nextPanel });
-    }, 150);
-  },
-  [panel, socket, dispatch]
-);
+      // ✅ Debounced commit via CommitHelpers (does dispatch + emit internally)
+      layoutSaveTimer.current = window.setTimeout(() => {
+        CommitHelpers.updatePanel({ dispatch: null, socket, panel: nextPanel });
+      }, 150);
+    },
+    [panel, socket, dispatch]
+  );
 
   // ----------------------------------------------------------
   // ✅ display/hidden derived from layout.style.display
@@ -273,30 +263,14 @@ const setLayout = useCallback(
     data: { role: "panel:drop", panelId: panel.id },
   });
 
-  const containerIdBelongsToPanel = (containerId) =>
-    !!containerId && (panel.containers || []).includes(containerId);
-
-  const isOverThisPanel = (() => {
-    if (!overData) return false;
-
-    if (overData.role?.includes?.("instance") && overData.panelId === panel.id) return true;
-    if (overData.role?.includes?.("panel") && overData.panelId === panel.id) return true;
-    if (overData.role?.includes?.("container") && overData.panelId === panel.id) return true;
-
-    const roleStr = typeof overData.role === "string" ? overData.role : "";
-    const isContainerZone = roleStr.startsWith("container:");
-    const isInstanceZone = roleStr === "instance" || roleStr.startsWith("instance:");
-
-    if ((isContainerZone || isInstanceZone) && overData.containerId) {
-      return containerIdBelongsToPanel(overData.containerId);
-    }
-    return false;
-  })();
 
   const collapsed = false;
 
+  const isHotPanel = hotTarget?.panelId === panel.id;
+
   const highlightPanel =
-    isContainerDrag && (isOverPanelDrop || isOverThisPanel) && !collapsed;
+    isContainerDrag && (isOverPanelDrop || isHotPanel) && !collapsed;
+
 
   const data = useMemo(
     () => ({
@@ -325,31 +299,31 @@ const setLayout = useCallback(
     [setPanelDragRef, setPanelDropRef]
   );
 
-const panelContainerIds = panel?.containers || [];
+  const panelContainerIds = panel?.containers || [];
 
-const panelContainers = useMemo(() => {
-  const out = [];
-  for (const id of panelContainerIds) {
-    const c = containersById?.[id];
-    if (c) out.push(c);
-  }
-  return out;
-}, [panelContainerIds, containersById]);
+  const panelContainers = useMemo(() => {
+    const out = [];
+    for (const id of panelContainerIds) {
+      const c = containersById?.[id];
+      if (c) out.push(c);
+    }
+    return out;
+  }, [panelContainerIds, containersById]);
 
   // ----------------------------------------------------------
   // ✅ Persist helpers
   // ----------------------------------------------------------
-const updatePanelFinal = useCallback(
-  (updatedPanel) => {
-    CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel });
-  },
-  [dispatch, socket]
-);
+  const updatePanelFinal = useCallback(
+    (updatedPanel) => {
+      CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel });
+    },
+    [dispatch, socket]
+  );
 
-const deletePanelFinal = useCallback(() => {
-  CommitHelpers.deletePanel({ dispatch, socket, panelId: panel.id });
-  window.clearTimeout(layoutSaveTimer.current);
-}, [dispatch, socket, panel.id]);
+  const deletePanelFinal = useCallback(() => {
+    CommitHelpers.deletePanel({ dispatch, socket, panelId: panel.id });
+    window.clearTimeout(layoutSaveTimer.current);
+  }, [dispatch, socket, panel.id]);
 
   const getTrackInfo = () => sizesRef?.current ?? null;
 
@@ -456,8 +430,9 @@ const deletePanelFinal = useCallback(() => {
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
-  const hotId = hotTarget?.panelId === panel.id ? hotTarget.containerId : null;
-  const hotRole = hotTarget?.panelId === panel.id ? hotTarget.role : "";
+  const hotId = isHotPanel ? hotTarget.containerId : null;
+  const hotRole = isHotPanel ? hotTarget.role : "";
+
   const outerStyle = isFullscreen
     ? {
       position: "absolute",
@@ -560,27 +535,27 @@ const deletePanelFinal = useCallback(() => {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
 
-              
-                <FormInput
-                  value={{ activePanelId: selectedPanelId }}
-                  onChange={(next) => {
-                    const id = next?.activePanelId;
-                    if (id) onSelectStackPanel(panel.row, panel.col, id);
-                  }}
-                  schema={{
-                    type: "select",
-                    className:"panel-select",
-                    key: "activePanelId",
-                    placeholder: "Select panel…",
-                    options: stackList.map((p, idx) => {
-                      const name =
-                        p?.layout?.name || p?.layout?.name === "" ? p.layout.name : "";
-                      const label = name?.trim() ? name : `Panel ${idx + 1}`;
-                      return { value: p.id, label };
-                    }),
-                  }}
-                />
-              
+
+              <FormInput
+                value={{ activePanelId: selectedPanelId }}
+                onChange={(next) => {
+                  const id = next?.activePanelId;
+                  if (id) onSelectStackPanel(panel.row, panel.col, id);
+                }}
+                schema={{
+                  type: "select",
+                  className: "panel-select",
+                  key: "activePanelId",
+                  placeholder: "Select panel…",
+                  options: stackList.map((p, idx) => {
+                    const name =
+                      p?.layout?.name || p?.layout?.name === "" ? p.layout.name : "";
+                    const label = name?.trim() ? name : `Panel ${idx + 1}`;
+                    return { value: p.id, label };
+                  }),
+                }}
+              />
+
 
               <Button
                 variant="ghost"
@@ -693,7 +668,10 @@ const deletePanelFinal = useCallback(() => {
                   addInstanceToContainer={addInstanceToContainer}
                   isDraggingContainer={isContainerDrag}
                   isInstanceDrag={isInstanceDrag}
+                  dispatch={dispatch}
+                  socket={socket}
                 />
+
               ))}
 
               {panelContainers.length === 0 && !isContainerDrag && (
@@ -752,11 +730,11 @@ export default React.memo(Panel, (prev, next) => {
 
   if (prev.onSelectStackPanel !== next.onSelectStackPanel) return false;
   if (prev.stackPanels !== next.stackPanels) return false;
-if (prev.onCycleStack !== next.onCycleStack) return false;
-if (prev.addContainerToPanel !== next.addContainerToPanel) return false;
-if (prev.addInstanceToContainer !== next.addInstanceToContainer) return false;
-if (prev.dispatch !== next.dispatch) return false;
-if (prev.socket !== next.socket) return false;
-if (prev.containersById !== next.containersById) return false;
+  if (prev.onCycleStack !== next.onCycleStack) return false;
+  if (prev.addContainerToPanel !== next.addContainerToPanel) return false;
+  if (prev.addInstanceToContainer !== next.addInstanceToContainer) return false;
+  if (prev.dispatch !== next.dispatch) return false;
+  if (prev.socket !== next.socket) return false;
+  if (prev.containersById !== next.containersById) return false;
   return true;
 });

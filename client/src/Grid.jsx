@@ -347,8 +347,7 @@ function GridInner({ components }) {
     setActivePanelInCell,
     cyclePanelStack,
 
-    overPanelId,
-    overDataRef,
+    // ✅ unified hover surface
     hotTarget,
     isContainerDrag,
     isInstanceDrag,
@@ -539,9 +538,7 @@ function GridInner({ components }) {
       sizesRef,
       containersById,
 
-      // ✅ injected (no context subscriptions) — Option B
-      overPanelId,
-      overDataRef,
+      // ✅ unified hover surface
       hotTarget,
       isContainerDrag,
       isInstanceDrag,
@@ -551,6 +548,7 @@ function GridInner({ components }) {
       onCycleStack: cyclePanelStack,
 
       dispatch,
+      socket,
       gridRef,
     }),
     [
@@ -560,18 +558,19 @@ function GridInner({ components }) {
       sizesRef,
       containersById,
 
-      // ✅ injected deps
-      overPanelId,
-      overDataRef,
       hotTarget,
       isContainerDrag,
       isInstanceDrag,
 
       setActivePanelInCell,
       cyclePanelStack,
+
       dispatch,
+      socket,
+      gridRef,
     ]
   );
+
 
 
   // If you want to hard-reset dnd when exiting fullscreen,

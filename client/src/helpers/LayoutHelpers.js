@@ -42,13 +42,17 @@ export function arrayMove(list = [], from, to) {
 export function addPanelToGrid({ dispatch, socket, grid, panelId, emit = true }) {
   if (!grid || !panelId) return;
   const updatedGrid = { ...grid, panels: ensureId(grid.panels || [], panelId) };
-  CommitHelpers.updateGrid({ dispatch, socket, gridId: grid.id, grid: updatedGrid, emit });
+  const gridId = grid?._id ?? grid?.id;
+  if (!gridId) return;
+  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
 }
 
 export function removePanelFromGrid({ dispatch, socket, grid, panelId, emit = true }) {
   if (!grid || !panelId) return;
   const updatedGrid = { ...grid, panels: removeId(grid.panels || [], panelId) };
-  CommitHelpers.updateGrid({ dispatch, socket, gridId: grid.id, grid: updatedGrid, emit });
+  const gridId = grid?._id ?? grid?.id;
+  if (!gridId) return;
+  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
 }
 
 // ------------------------
@@ -83,6 +87,24 @@ export function reorderContainersInPanel({ dispatch, socket, panel, fromIndex, t
   const next = arrayMove(panel.containers || [], fromIndex, toIndex);
   const updatedPanel = { ...panel, containers: next };
   CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel, emit });
+}
+export function setPanelStackDisplay({ dispatch, socket, panel, display }) {
+  if (!panel?.id) return;
+
+  const curr = panel.layout || {};
+  const style = (curr.style && typeof curr.style === "object") ? curr.style : {};
+  const nextPanel = {
+    ...panel,
+    layout: {
+      ...curr,
+      style: {
+        ...style,
+        display: display ?? "block",
+      },
+    },
+  };
+
+  CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel, emit: true });
 }
 
 // ------------------------
@@ -183,76 +205,8 @@ export function moveInstanceBetweenContainers({
 export function resizeGrid({ dispatch, socket, grid, rows, cols, emit = true }) {
   if (!grid) return;
   const updatedGrid = { ...grid, rows, cols };
-  CommitHelpers.updateGrid({ dispatch, socket, gridId: grid.id, grid: updatedGrid, emit });
-}
+  const gridId = grid?._id ?? grid?.id;
+  if (!gridId) return;
+  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
 
-// helpers/LayoutHelpers.js (ADD THESE)
-import * as CommitHelpers from "./CommitHelpers";
-
-// ------------------------------------------
-// ✅ Stack display helper (hard commit)
-// ------------------------------------------
-export function setPanelStackDisplay({ dispatch, socket, panel, display }) {
-  if (!panel?.id) return;
-
-  const curr = panel.layout || {};
-  const style = (curr.style && typeof curr.style === "object") ? curr.style : {};
-  const nextPanel = {
-    ...panel,
-    layout: {
-      ...curr,
-      style: {
-        ...style,
-        display: display ?? "block",
-      },
-    },
-  };
-
-  CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel, emit: true });
-}
-
-// ------------------------------------------
-// ✅ Move container between panels (hard commit)
-// ------------------------------------------
-export function moveContainerBetweenPanels({ dispatch, socket, fromPanel, toPanel, containerId }) {
-  if (!fromPanel?.id || !toPanel?.id || !containerId) return;
-
-  const fromList = Array.isArray(fromPanel.containers) ? fromPanel.containers : [];
-  const toList = Array.isArray(toPanel.containers) ? toPanel.containers : [];
-
-  const nextFrom = {
-    ...fromPanel,
-    containers: fromList.filter((id) => id !== containerId),
-  };
-
-  const nextTo = {
-    ...toPanel,
-    containers: [...toList.filter((id) => id !== containerId), containerId],
-  };
-
-  CommitHelpers.updatePanel({ dispatch, socket, panel: nextFrom, emit: true });
-  CommitHelpers.updatePanel({ dispatch, socket, panel: nextTo, emit: true });
-}
-
-// ------------------------------------------
-// ✅ Move instance between containers (hard commit)
-// ------------------------------------------
-export function moveInstanceBetweenContainers({ dispatch, socket, fromContainer, toContainer, instanceId }) {
-  if (!fromContainer?.id || !toContainer?.id || !instanceId) return;
-
-  const fromItems = Array.isArray(fromContainer.items) ? fromContainer.items : [];
-  const toItems = Array.isArray(toContainer.items) ? toContainer.items : [];
-
-  const nextFrom = {
-    ...fromContainer,
-    items: fromItems.filter((id) => id !== instanceId),
-  };
-
-  const nextTo = {
-    ...toContainer,
-    items: [...toItems.filter((id) => id !== instanceId), instanceId],
-  };
-
-  CommitHelpers.updateContainer({ dispatch, socket, container: nextFrom, emit: true });
-  CommitHelpers.updateContainer({ dispatch, socket, container: nextTo, emit: true });
 }
