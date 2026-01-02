@@ -1,4 +1,4 @@
-// SortableContainer.jsx
+// SortableContainer.jsx — UPDATED: CommitHelpers emit-flag support + safer label commit
 import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -45,21 +45,24 @@ function SortableContainerInner({
 
   const commitLabel = useCallback(() => {
     const next = (draft?.label ?? "").trim();
+    // allow empty label? keep your old behavior: ignore empty commits.
     if (!next) return;
 
-    // ✅ CommitHelpers expects { container } with id
+    // ✅ HARD commit (dispatch + emit)
     CommitHelpers.updateContainer({
       dispatch,
       socket,
-      container: { id: container.id, label: next },
+      container: { ...container, label: next },
+      emit: true,
     });
-  }, [draft?.label, container.id, dispatch, socket]);
+  }, [draft?.label, container, dispatch, socket]);
 
   const deleteMe = useCallback(() => {
     CommitHelpers.deleteContainer({
       dispatch,
       socket,
       containerId: container.id,
+      emit: true,
     });
   }, [container.id, dispatch, socket]);
 
@@ -109,21 +112,23 @@ function SortableContainerInner({
   const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={{
-        ...style,
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: 0,
-        overflow: "visible",
-        outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "0px solid transparent",
-        outlineOffset: 0,
-        borderRadius: 10,
-      }}
-      className="container-shell bg-background2 rounded-md border border-border shadow-inner"
-    >
+    return (
+  <div
+    ref={setNodeRef}
+    data-container-id={container.id} // ✅ REQUIRED for getHoveredContainerId()
+    style={{
+      ...style,
+      display: "flex",
+      flexDirection: "column",
+      height: "100%",
+      minHeight: 0,
+      overflow: "visible",
+      outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "0px solid transparent",
+      outlineOffset: 0,
+      borderRadius: 10,
+    }}
+    className="container-shell bg-background2 rounded-md border border-border shadow-inner"
+  >
       {/* HEADER */}
       <div
         className="container-header no-select"
@@ -144,7 +149,10 @@ function SortableContainerInner({
           <GripVertical className="h-4 w-4 text-white" />
         </div>
 
-        <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
+        <div
+          className="font-mono text-[10px] sm:text-xs"
+          style={{ fontWeight: 500, paddingLeft: 3 }}
+        >
           {container.label}
         </div>
 
@@ -166,7 +174,10 @@ function SortableContainerInner({
       </div>
 
       {/* BODY */}
-      <div className="container-body" style={{ flex: 1, overflow: "visible", display: "flex" }}>
+      <div
+        className="container-body"
+        style={{ flex: 1, overflow: "visible", display: "flex" }}
+      >
         <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
           <div
             ref={list.setNodeRef}
@@ -185,7 +196,10 @@ function SortableContainerInner({
             }}
           />
 
-          <div className="container-list instance-pocket" style={{ position: "relative", overflow: "visible", zIndex: 1 }}>
+          <div
+            className="container-list instance-pocket"
+            style={{ position: "relative", overflow: "visible", zIndex: 1 }}
+          >
             {items.length > 0 && (
               <SortableContext
                 id={`container-sortable:${container.id}`}

@@ -1,87 +1,47 @@
 // state/actions.js
 // =========================================
 // actions.js — SINGLE SOURCE OF TRUTH
-// Aligned with:
-// - server.js socket events
-// - state/bindSocketToStore.js dispatches
-//
-// Conventions:
-// - CREATE_* : create a new entity (server will create + emit created/updated)
-// - UPDATE_* : update an existing entity
-// - DELETE_* : delete an entity
-//
-// IMPORTANT (matches your current bindSocketToStore.js):
-// - container_created          -> CREATE_CONTAINER
-// - instance_created_in_container -> CREATE_INSTANCE_IN_CONTAINER
-// - container_items_updated    -> UPDATE_CONTAINER_ITEMS
-// - instance_updated           -> UPDATE_INSTANCE
-// - panel_updated              -> UPDATE_PANEL
-// - grid_updated               -> UPDATE_GRID
-// - full_state                 -> FULL_STATE (+ SET_GRID_ID handled in bindSocketToStore)
+// ✅ UPDATED:
+// - updateGridAction now matches reducer + bindSocketToStore:
+//   payload: { gridId, grid }
+// - adds creator for CREATE_INSTANCE_IN_CONTAINER (already in ActionTypes)
 // =========================================
 
 export const ActionTypes = {
-  // ------------------------------------------------------
-  // Hydration
-  // ------------------------------------------------------
   FULL_STATE: "FULL_STATE",
 
-  // ------------------------------------------------------
-  // Auth/User/Grid selection
-  // ------------------------------------------------------
   SET_USER_ID: "SET_USER_ID",
   SET_GRID_ID: "SET_GRID_ID",
   LOGOUT: "LOGOUT",
-  // ------------------------------------------------------
-  // Grids
-  // ------------------------------------------------------
+
   CREATE_GRID: "CREATE_GRID",
   UPDATE_GRID: "UPDATE_GRID",
   DELETE_GRID: "DELETE_GRID",
   SET_AVAILABLE_GRIDS: "SET_AVAILABLE_GRIDS",
   SET_GRID: "SET_GRID",
 
-  // ------------------------------------------------------
-  // Panels
-  // ------------------------------------------------------
   CREATE_PANEL: "CREATE_PANEL",
   UPDATE_PANEL: "UPDATE_PANEL",
   DELETE_PANEL: "DELETE_PANEL",
   SET_PANELS: "SET_PANELS",
 
-  // ------------------------------------------------------
-  // Containers
-  // ------------------------------------------------------
   CREATE_CONTAINER: "CREATE_CONTAINER",
   UPDATE_CONTAINER: "UPDATE_CONTAINER",
   DELETE_CONTAINER: "DELETE_CONTAINER",
   SET_CONTAINERS: "SET_CONTAINERS",
-
-  // Used by bindSocketToStore for reorder:
   UPDATE_CONTAINER_ITEMS: "UPDATE_CONTAINER_ITEMS",
 
-  // ------------------------------------------------------
-  // Instances
-  // ------------------------------------------------------
   CREATE_INSTANCE: "CREATE_INSTANCE",
   UPDATE_INSTANCE: "UPDATE_INSTANCE",
   DELETE_INSTANCE: "DELETE_INSTANCE",
   SET_INSTANCES: "SET_INSTANCES",
 
-  // Used by bindSocketToStore for "create inside container":
   CREATE_INSTANCE_IN_CONTAINER: "CREATE_INSTANCE_IN_CONTAINER",
 
-  // ------------------------------------------------------
-  // DnD
-  // ------------------------------------------------------
   SET_ACTIVE_ID: "SET_ACTIVE_ID",
   SET_ACTIVE_SIZE: "SET_ACTIVE_SIZE",
   SOFT_TICK: "SOFT_TICK",
 };
-
-// =========================================================
-// Action Creators (optional but nice)
-// =========================================================
 
 // ---- hydration ----
 export const fullStateAction = (payload) => ({
@@ -101,6 +61,7 @@ export const setGridIdAction = (gridId) => ({
 });
 
 export const logoutAction = () => ({ type: ActionTypes.LOGOUT });
+
 // ---- grids ----
 export const setGridAction = (grid) => ({
   type: ActionTypes.SET_GRID,
@@ -117,9 +78,10 @@ export const createGridAction = (grid) => ({
   payload: { grid },
 });
 
-export const updateGridAction = (grid) => ({
+// ✅ FIX: now matches reducer expectations
+export const updateGridAction = ({ gridId, grid }) => ({
   type: ActionTypes.UPDATE_GRID,
-  payload: { grid },
+  payload: { gridId, grid },
 });
 
 export const deleteGridAction = (gridId) => ({
@@ -169,8 +131,6 @@ export const deleteContainerAction = (containerId) => ({
   payload: { containerId },
 });
 
-// This matches bindSocketToStore.js:
-// dispatch({ type: UPDATE_CONTAINER_ITEMS, payload: { containerId, items } })
 export const updateContainerItemsAction = ({ containerId, items }) => ({
   type: ActionTypes.UPDATE_CONTAINER_ITEMS,
   payload: { containerId, items },
@@ -197,8 +157,7 @@ export const deleteInstanceAction = (instanceId) => ({
   payload: { instanceId },
 });
 
-// This matches bindSocketToStore.js:
-// dispatch({ type: CREATE_INSTANCE_IN_CONTAINER, payload: { containerId, instance } })
+// ✅ IMPORTANT for your server’s supported API
 export const createInstanceInContainerAction = ({ containerId, instance }) => ({
   type: ActionTypes.CREATE_INSTANCE_IN_CONTAINER,
   payload: { containerId, instance },

@@ -1,8 +1,7 @@
-// Panel.jsx — MERGED: persist layout on panel, derive from panel.layout, debounce backend writes
+// Panel.jsx — UPDATED: CommitHelpers emit-flag + centralized hover + stack UI fixes
 import React, { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
-import { emit } from "./socket";
 import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 
 import { Button } from "./components/ui/button";
@@ -34,7 +33,6 @@ function sameIdList(a = [], b = []) {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
-
 
 /* ------------------------------------------------------------
    ✅ Layout defaults + merge (back-compat safe)
@@ -123,7 +121,9 @@ function Panel({
   cols,
   rows,
 
-  hotTarget,
+  // ✅ Centralized hover surface from coordinator (single source of truth)
+  hotTarget, // { role, panelId, containerId, instanceId?, ... } | null
+
   isContainerDrag,
   isInstanceDrag,
   addContainerToPanel,
@@ -134,11 +134,11 @@ function Panel({
   fullscreenPanelId,
   setFullscreenPanelId,
   forceFullscreen = false,
-  // ✅ new (optional): stacking UI support
-  onSelectStackPanel, // (row, col, nextPanelId) => void
-  onCycleStack,       // ({ panelId, dir }) => void
-  stackPanels,        // [{id, layout?...}] for this cell
 
+  // ✅ stacking UI support (coordinator-owned)
+  onSelectStackPanel, // optional: (row, col, nextPanelId) => void
+  onCycleStack, // ({ panelId, dir }) => void
+  stackPanels, // stack list for this cell
 }) {
   // ----------------------------------------------------------
   // ✅ Layout: derive from panel.layout + debounced backend write
@@ -150,11 +150,6 @@ function Panel({
     return () => window.clearTimeout(layoutSaveTimer.current);
   }, []);
 
-  /**
-   * ✅ Immediate commit helper (blur/enter commits)
-   * - cancels pending debounce
-   * - writes reducer + emits once
-   */
   const commitPanelLayout = useCallback(
     (nextLayout) => {
       if (!panel) return;
@@ -178,20 +173,18 @@ function Panel({
 
       const nextPanel = { ...panel, layout: merged };
 
-      // ✅ Cancel any pending debounce
       window.clearTimeout(layoutSaveTimer.current);
 
-      // ✅ Immediate commit via CommitHelpers (does dispatch + emit)
-      CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel });
+      CommitHelpers.updatePanel({
+        dispatch,
+        socket,
+        panel: nextPanel,
+        emit: true,
+      });
     },
     [panel, socket, dispatch]
   );
 
-  /**
-   * ✅ Debounced setLayout (sliders / continuous changes)
-   * - writes reducer immediately (optimistic)
-   * - emits after 150ms pause
-   */
   const setLayout = useCallback(
     (nextLayout) => {
       if (!panel) return;
@@ -215,14 +208,23 @@ function Panel({
 
       const nextPanel = { ...panel, layout: merged };
 
-      CommitHelpers.updatePanel({ dispatch, socket: null, panel: nextPanel });
+      // soft commit (dispatch only)
+      CommitHelpers.updatePanel({
+        dispatch,
+        socket,
+        panel: nextPanel,
+        emit: false,
+      });
 
-      // ✅ Cancel any previous timer
       window.clearTimeout(layoutSaveTimer.current);
 
-      // ✅ Debounced commit via CommitHelpers (does dispatch + emit internally)
       layoutSaveTimer.current = window.setTimeout(() => {
-        CommitHelpers.updatePanel({ dispatch: null, socket, panel: nextPanel });
+        CommitHelpers.updatePanel({
+          dispatch: null,
+          socket,
+          panel: nextPanel,
+          emit: true,
+        });
       }, 150);
     },
     [panel, socket, dispatch]
@@ -235,7 +237,6 @@ function Panel({
   const hidden = display === "none";
 
   useEffect(() => {
-    // prevent pending debounce from re-overwriting stacking display changes
     window.clearTimeout(layoutSaveTimer.current);
   }, [display]);
 
@@ -263,14 +264,13 @@ function Panel({
     data: { role: "panel:drop", panelId: panel.id },
   });
 
-
   const collapsed = false;
 
-  const isHotPanel = hotTarget?.panelId === panel.id;
+  // ✅ centralized hover check (don’t hit-test here)
+  const isHotPanel = (hotTarget?.panelId ?? null) === panel.id;
 
   const highlightPanel =
     isContainerDrag && (isOverPanelDrop || isHotPanel) && !collapsed;
-
 
   const data = useMemo(
     () => ({
@@ -315,13 +315,13 @@ function Panel({
   // ----------------------------------------------------------
   const updatePanelFinal = useCallback(
     (updatedPanel) => {
-      CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel });
+      CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel, emit: true });
     },
     [dispatch, socket]
   );
 
   const deletePanelFinal = useCallback(() => {
-    CommitHelpers.deletePanel({ dispatch, socket, panelId: panel.id });
+    CommitHelpers.deletePanel({ dispatch, socket, panelId: panel.id, emit: true });
     window.clearTimeout(layoutSaveTimer.current);
   }, [dispatch, socket, panel.id]);
 
@@ -425,64 +425,61 @@ function Panel({
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
-      ? "2px solid rgba(50,150,255,0.9)"
-      : "none";
+    ? "2px solid rgba(50,150,255,0.9)"
+    : "none";
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
-  const hotId = isHotPanel ? hotTarget.containerId : null;
-  const hotRole = isHotPanel ? hotTarget.role : "";
+  // ✅ “hot” child info for container UI
+  const hotId = isHotPanel ? hotTarget?.containerId ?? null : null;
+  const hotRole = isHotPanel ? hotTarget?.role ?? "" : "";
 
   const outerStyle = isFullscreen
     ? {
-      position: "absolute",
-      inset: 0,
-      margin: 0,
-      borderRadius: 12,
-      display: "block",
-      pointerEvents: "auto",
-      zIndex: 1,
-    }
+        position: "absolute",
+        inset: 0,
+        margin: 0,
+        borderRadius: 12,
+        display: "block",
+        pointerEvents: "auto",
+        zIndex: 1,
+      }
     : {
-      gridArea,
-      borderRadius: 8,
-      outline: outlineStyle,
-      outlineOffset: "-2px",
-      overflow: "hidden",
-      position: "relative",
-      boxSizing: "border-box",
-      margin: 5,
-      transition: isResizing ? "all 80ms linear" : "none",
-      opacity: collapsed ? 0 : 1,
-      visibility: collapsed ? "hidden" : "visible",
-      zIndex: 50,
-      display,
-      pointerEvents: hidden || collapsed ? "none" : "auto",
-    };
+        gridArea,
+        borderRadius: 8,
+        outline: outlineStyle,
+        outlineOffset: "-2px",
+        overflow: "hidden",
+        position: "relative",
+        boxSizing: "border-box",
+        margin: 5,
+        transition: isResizing ? "all 80ms linear" : "none",
+        opacity: collapsed ? 0 : 1,
+        visibility: collapsed ? "hidden" : "visible",
+        zIndex: 50,
+        display,
+        pointerEvents: hidden || collapsed ? "none" : "auto",
+      };
 
   // -----------------------------
-  // ✅ stack UI (optional)
+  // ✅ stack UI
   // -----------------------------
   const stackList = Array.isArray(stackPanels) ? stackPanels : null;
-  const showStackSelect =
-    !isFullscreen &&
-    !!stackList &&
-    stackList.length > 1 &&
-    typeof onSelectStackPanel === "function";
+  const hasStack = !isFullscreen && !!stackList && stackList.length > 1;
+
+  // show chevrons if we can cycle; dropdown only if selector exists
+  const canCycle = hasStack && typeof onCycleStack === "function";
+  const canSelect = hasStack && typeof onSelectStackPanel === "function";
 
   const selectedPanelId = panel.id;
+
   const cycleStack = useCallback(
     (dir) => {
-      if (!showStackSelect) return;
+      if (!canCycle) return;
       onCycleStack?.({ panelId: panel.id, dir });
     },
-    [showStackSelect, onCycleStack, panel.id]
+    [canCycle, onCycleStack, panel.id]
   );
-
-  const stackIndex = useMemo(() => {
-    if (!showStackSelect) return -1;
-    return stackList.findIndex((p) => p.id === selectedPanelId);
-  }, [showStackSelect, stackList, selectedPanelId]);
 
   return (
     <div
@@ -491,7 +488,6 @@ function Panel({
       ref={setPanelShellRef}
       style={outerStyle}
     >
-
       <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
         {/* HEADER */}
         <div
@@ -518,9 +514,17 @@ function Panel({
             <GripVertical className="h-4 w-4 text-white" />
           </div>
 
-          {/* ✅ stack selector + chevrons */}
-          {showStackSelect ? (
-            <div className="panel-selector" style={{ display: "flex", justifyContent: "start", alignItems: "center", maxWidth: 260 }}>
+          {/* ✅ stack UI */}
+          {hasStack ? (
+            <div
+              className="panel-selector"
+              style={{
+                display: "flex",
+                justifyContent: "start",
+                alignItems: "center",
+                maxWidth: 260,
+              }}
+            >
               <Button
                 variant="ghost"
                 size="sm"
@@ -529,33 +533,40 @@ function Panel({
                   e.stopPropagation();
                   cycleStack(-1);
                 }}
-                disabled={stackList.length <= 1}
+                disabled={!canCycle}
                 aria-label="Previous panel"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
 
-
-              <FormInput
-                value={{ activePanelId: selectedPanelId }}
-                onChange={(next) => {
-                  const id = next?.activePanelId;
-                  if (id) onSelectStackPanel(panel.row, panel.col, id);
-                }}
-                schema={{
-                  type: "select",
-                  className: "panel-select",
-                  key: "activePanelId",
-                  placeholder: "Select panel…",
-                  options: stackList.map((p, idx) => {
-                    const name =
-                      p?.layout?.name || p?.layout?.name === "" ? p.layout.name : "";
-                    const label = name?.trim() ? name : `Panel ${idx + 1}`;
-                    return { value: p.id, label };
-                  }),
-                }}
-              />
-
+              {canSelect ? (
+                <FormInput
+                  value={{ activePanelId: selectedPanelId }}
+                  onChange={(next) => {
+                    const id = next?.activePanelId;
+                    if (id) onSelectStackPanel(panel.row, panel.col, id);
+                  }}
+                  schema={{
+                    type: "select",
+                    className: "panel-select",
+                    key: "activePanelId",
+                    placeholder: "Select panel…",
+                    options: stackList.map((p, idx) => {
+                      const name =
+                        p?.layout?.name || p?.layout?.name === "" ? p.layout.name : "";
+                      const label = name?.trim() ? name : `Panel ${idx + 1}`;
+                      return { value: p.id, label };
+                    }),
+                  }}
+                />
+              ) : (
+                <div
+                  className="font-mono text-[10px] sm:text-xs"
+                  style={{ fontWeight: 500, paddingLeft: 3 }}
+                >
+                  {panel?.layout?.name}
+                </div>
+              )}
 
               <Button
                 variant="ghost"
@@ -565,7 +576,7 @@ function Panel({
                   e.stopPropagation();
                   cycleStack(1);
                 }}
-                disabled={stackList.length <= 1}
+                disabled={!canCycle}
                 aria-label="Next panel"
               >
                 <ChevronRight className="h-4 w-4" />
@@ -605,9 +616,12 @@ function Panel({
                 isFullscreen ? closeFullscreen() : openFullscreen();
               }}
             >
-              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+              {isFullscreen ? (
+                <Minimize className="h-4 w-4" />
+              ) : (
+                <Maximize className="h-4 w-4" />
+              )}
             </Button>
-
           </div>
         </div>
 
@@ -633,8 +647,12 @@ function Panel({
               className="h-full w-full"
               display={layout.display}
               flow={layout.flow}
-              wrap={layout.display === "flex" ? (layout.wrap ?? "wrap") : undefined}
-              columns={layout.display === "grid" || layout.display === "columns" ? layout.columns : 0}
+              wrap={layout.display === "flex" ? layout.wrap ?? "wrap" : undefined}
+              columns={
+                layout.display === "grid" || layout.display === "columns"
+                  ? layout.columns
+                  : 0
+              }
               rows={layout.display === "grid" ? layout.rows : 0}
               alignContent={layout.alignContent}
               alignItems={layout.alignItems}
@@ -671,11 +689,12 @@ function Panel({
                   dispatch={dispatch}
                   socket={socket}
                 />
-
               ))}
 
               {panelContainers.length === 0 && !isContainerDrag && (
-                <div className="mt-3 opacity-70 text-[13px]">Create a container to start.</div>
+                <div className="mt-3 opacity-70 text-[13px]">
+                  Create a container to start.
+                </div>
               )}
             </ListWrapper>
           </SortableContext>
@@ -691,8 +710,11 @@ function Panel({
 
 export default React.memo(Panel, (prev, next) => {
   if (prev.panel?.id !== next.panel?.id) return false;
-  const prevIsFullscreen = !!prev.forceFullscreen || prev.fullscreenPanelId === prev.panel?.id;
-  const nextIsFullscreen = !!next.forceFullscreen || next.fullscreenPanelId === next.panel?.id;
+
+  const prevIsFullscreen =
+    !!prev.forceFullscreen || prev.fullscreenPanelId === prev.panel?.id;
+  const nextIsFullscreen =
+    !!next.forceFullscreen || next.fullscreenPanelId === next.panel?.id;
   if (prevIsFullscreen !== nextIsFullscreen) return false;
 
   if (prev.panel?.row !== next.panel?.row) return false;
@@ -701,7 +723,6 @@ export default React.memo(Panel, (prev, next) => {
   if (prev.panel?.height !== next.panel?.height) return false;
 
   if (prev.panel?.layout !== next.panel?.layout) return false;
-
   if (!sameIdList(prev.panel?.containers, next.panel?.containers)) return false;
 
   if (prev.isContainerDrag !== next.isContainerDrag) return false;
@@ -713,12 +734,9 @@ export default React.memo(Panel, (prev, next) => {
   const prevWasAffected = prev.panel?.id === prevHotPanel;
   const nextIsAffected = next.panel?.id === nextHotPanel;
 
-  // If this panel is neither the old hot panel nor the new hot panel,
-  // ignore hotTarget changes to avoid re-rendering every panel.
   if (!prevWasAffected && !nextIsAffected) {
-    // do nothing
+    // ignore hotTarget changes for non-affected panels
   } else {
-    // for affected panels, compare the hot container/role
     if (prev.hotTarget?.containerId !== next.hotTarget?.containerId) return false;
     if (prev.hotTarget?.role !== next.hotTarget?.role) return false;
   }
@@ -731,10 +749,13 @@ export default React.memo(Panel, (prev, next) => {
   if (prev.onSelectStackPanel !== next.onSelectStackPanel) return false;
   if (prev.stackPanels !== next.stackPanels) return false;
   if (prev.onCycleStack !== next.onCycleStack) return false;
+
   if (prev.addContainerToPanel !== next.addContainerToPanel) return false;
   if (prev.addInstanceToContainer !== next.addInstanceToContainer) return false;
+
   if (prev.dispatch !== next.dispatch) return false;
   if (prev.socket !== next.socket) return false;
   if (prev.containersById !== next.containersById) return false;
+
   return true;
 });

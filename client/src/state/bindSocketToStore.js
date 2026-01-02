@@ -1,15 +1,8 @@
 // client/src/state/bindSocketToStore.js
 // =========================================
 // bindSocketToStore.js — CLEAN + CONSISTENT
-// Goals:
-// - Match server.js event names + payload shapes
-// - Dispatch ActionTypes using the SAME shapes your reducer/action-creators expect
-// - Keep auth + full_state behavior correct (reconnect w/ token, then hydrate)
-// - Provide proper cleanup for HMR
-//
-// MERGED FIXES:
-// - full_state -> ONLY dispatch FULL_STATE (atomic hydrate incl gridId)
-// - auth_success -> DO NOT wipe moduli-gridId (so selection persists)
+// ✅ UPDATED for no-echo rooms:
+// - Other windows must self-heal if their active grid is deleted.
 // =========================================
 
 import { ActionTypes } from "./actions";
@@ -26,7 +19,6 @@ export function bindSocketToStore(socket, dispatch) {
       localStorage.setItem("moduli-gridId", payload.gridId);
     }
 
-    // ✅ single atomic hydrate (sets gridId + grid + panels + grids list + etc)
     dispatch({ type: ActionTypes.FULL_STATE, payload });
   }
 
@@ -53,7 +45,6 @@ export function bindSocketToStore(socket, dispatch) {
     });
   }
 
-  // forward-compat
   function onContainerUpdated(payload = {}) {
     const container = payload.container || payload;
     const id = container?.id || payload.containerId;
@@ -65,7 +56,6 @@ export function bindSocketToStore(socket, dispatch) {
     });
   }
 
-  // forward-compat
   function onContainerDeleted(payload = {}) {
     const containerId = payload.containerId || payload.id;
     if (!containerId) return;
@@ -102,7 +92,6 @@ export function bindSocketToStore(socket, dispatch) {
     });
   }
 
-  // forward-compat
   function onInstanceDeleted(payload = {}) {
     const instanceId = payload.instanceId || payload.id;
     if (!instanceId) return;
@@ -129,7 +118,6 @@ export function bindSocketToStore(socket, dispatch) {
     });
   }
 
-  // forward-compat
   function onPanelDeleted(payload = {}) {
     const panelId = payload.panelId || payload.id;
     if (!panelId) return;
@@ -140,7 +128,6 @@ export function bindSocketToStore(socket, dispatch) {
     });
   }
 
-  // optional alias
   function onPanelCreated(panel) {
     if (!panel?.id) return;
 
@@ -161,14 +148,15 @@ export function bindSocketToStore(socket, dispatch) {
     const gridId = payload.gridId || payload.id;
     const patch = payload.grid || payload;
 
+    if (!gridId) return;
+
     dispatch({
       type: ActionTypes.UPDATE_GRID,
       payload: { gridId, grid: patch },
     });
   }
 
-
-  // forward-compat
+  // ✅ UPDATED: self-heal other windows when their active grid is deleted
   function onGridDeleted(payload = {}) {
     const gridId = payload.gridId || payload.id;
     if (!gridId) return;
@@ -179,10 +167,13 @@ export function bindSocketToStore(socket, dispatch) {
     });
 
     const saved = localStorage.getItem("moduli-gridId");
-    if (saved && saved === gridId) localStorage.removeItem("moduli-gridId");
+    if (saved && saved === gridId) {
+      localStorage.removeItem("moduli-gridId");
+      // ✅ in no-echo mode, other windows must re-hydrate themselves
+      socket.emit("request_full_state");
+    }
   }
 
-  // optional alias
   function onGridCreated(payload = {}) {
     const grid = payload.grid || payload;
     dispatch({
@@ -204,24 +195,18 @@ export function bindSocketToStore(socket, dispatch) {
     if (token) localStorage.setItem("moduli-token", token);
     if (userId) localStorage.setItem("moduli-userId", userId);
 
-    // ✅ IMPORTANT FIX:
-    // Do NOT wipe moduli-gridId here, or you lose selected grid persistence.
-    // localStorage.removeItem("moduli-gridId");
-
     dispatch({
       type: ActionTypes.SET_USER_ID,
       payload: { userId },
     });
 
-    // Force a new handshake so io.use(auth) runs with the token
     try {
       socket.disconnect();
-    } catch { }
+    } catch {}
 
     socket.auth = { token };
     socket.connect();
 
-    // Wait for reconnect, THEN hydrate
     socket.once("connect", () => {
       const savedGridId = localStorage.getItem("moduli-gridId");
       socket.emit(
@@ -252,9 +237,9 @@ export function bindSocketToStore(socket, dispatch) {
 
       try {
         socket.disconnect();
-      } catch { }
+      } catch {}
 
-      socket.auth = {}; // guest
+      socket.auth = {};
       socket.connect();
     }
   }
@@ -267,14 +252,13 @@ export function bindSocketToStore(socket, dispatch) {
   // SERVER ERRORS / MISC
   // ======================================================
   function onServerError(msg) {
-  console.warn("[socket] server_error:", msg);
+    console.warn("[socket] server_error:", msg);
 
-  // ✅ self-heal bad saved gridId
-  if (typeof msg === "string" && msg.toLowerCase().includes("grid not found")) {
-    localStorage.removeItem("moduli-gridId");
-    socket.emit("request_full_state"); // request default/new/first grid
+    if (typeof msg === "string" && msg.toLowerCase().includes("grid not found")) {
+      localStorage.removeItem("moduli-gridId");
+      socket.emit("request_full_state");
+    }
   }
-}
   socket.on("server_error", onServerError);
 
   // ======================================================

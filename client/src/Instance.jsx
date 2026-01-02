@@ -36,6 +36,7 @@ function InstanceInner({
       dispatch,
       socket,
       instance: { id, label: next },
+      emit: true
     });
   }, [draft?.label, id, dispatch, socket]);
 
@@ -44,6 +45,7 @@ function InstanceInner({
       dispatch,
       socket,
       instanceId: id,
+      emit: true
     });
   }, [id, dispatch, socket]);
 

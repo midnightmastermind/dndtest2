@@ -1,4 +1,4 @@
-// GridInner.jsx — MERGED (Grid is dumb: render + resize + wire DnDContext)
+// GridInner.jsx — UPDATED (Grid is dumb: render + resize + wire DnDContext)
 // ✅ DnDKit + native/cross-window drag logic lives in useDnDControlCoordinator
 // ✅ Grid only wires DndContext to coordinator outputs + renders overlays/canvas
 // ✅ Stacks are draft-aware and owned by coordinator (no Grid commits / repairs)
@@ -33,7 +33,10 @@ function ContainerClone({ container }) {
   if (!container) return null;
 
   return (
-    <div className="container-shell" style={{ pointerEvents: "none", opacity: 0.95 }}>
+    <div
+      className="container-shell"
+      style={{ pointerEvents: "none", opacity: 0.95 }}
+    >
       <div className="container-header">
         <div style={{ paddingLeft: 6 }}>
           <GripVertical className="h-4 w-4 text-white" />
@@ -44,7 +47,14 @@ function ContainerClone({ container }) {
       </div>
 
       <div className="container-list" style={{ minHeight: 60 }}>
-        <div style={{ fontSize: 12, opacity: 0.6, fontStyle: "italic", padding: 8 }}>
+        <div
+          style={{
+            fontSize: 12,
+            opacity: 0.6,
+            fontStyle: "italic",
+            padding: 8,
+          }}
+        >
           Dragging…
         </div>
       </div>
@@ -147,7 +157,13 @@ function GridCanvas({
               disabled={false}
             />
           ) : (
-            <CellStatic key={cellId} r={r} c={c} dark={dark} highlight={highlight} />
+            <CellStatic
+              key={cellId}
+              r={r}
+              c={c}
+              dark={dark}
+              highlight={highlight}
+            />
           )
         );
       }
@@ -255,8 +271,13 @@ function GridInner({ components }) {
   const [dragTick, setDragTick] = useState(0);
   const scheduleSoftTick = useCallback(() => setDragTick((x) => x + 1), []);
 
-  const { dispatch, socket, addContainerToPanel, addInstanceToContainer, instancesById } =
-    useContext(GridActionsContext);
+  const {
+    dispatch,
+    socket,
+    addContainerToPanel,
+    addInstanceToContainer,
+    instancesById,
+  } = useContext(GridActionsContext);
 
   const grid = state.grid;
   const gridId = grid?._id;
@@ -269,7 +290,6 @@ function GridInner({ components }) {
     const arr = state.panels || [];
     return arr.filter((p) => p.gridId === gridId);
   }, [state.panels, gridId]);
-
 
   // ✅ Fullscreen is overlay-only
   const [fullscreenPanelId, setFullscreenPanelId] = useState(null);
@@ -321,14 +341,27 @@ function GridInner({ components }) {
   const rowTemplate = rowSizes.map((s) => `${s}fr`).join(" ");
 
   // -----------------------------
-  // ✅ Coordinator owns: sensors, collisionDetection, pointer listeners, panel placement, drafts,
-  //    stack visibility + stack commits, native/cross-window logic, etc.
+  // ✅ Coordinator
   // -----------------------------
+  const coord = useDnDControlCoordinator({
+    state,
+    dispatch,
+    socket,
+    scheduleSoftTick,
+
+    gridRef,
+    rows,
+    cols,
+    rowSizes,
+    colSizes,
+
+    visiblePanels,
+  });
+
   const {
     sensors,
     collisionDetection,
     onDragStart,
-    onDragMove,
     onDragOver,
     onDragEnd,
     onDragCancel,
@@ -340,47 +373,47 @@ function GridInner({ components }) {
 
     getWorkingContainers,
     getWorkingPanels,
+    getWorkingAllPanels,
 
-    // ✅ stacks from coordinator (draft-aware)
+    // stacks
     getStacksByCell,
     getStackForPanel,
     setActivePanelInCell,
     cyclePanelStack,
 
-    // ✅ unified hover surface
+    // ✅ centralized hover surface
     hotTarget,
+
+    // (optional debug)
+    getHoveredPanelId,
+    getHoveredContainerId,
+
     isContainerDrag,
     isInstanceDrag,
-  } = useDnDControlCoordinator({
-    state,
-    dispatch,
-    socket,
-    scheduleSoftTick,
-
-    // allow coordinator to compute cell math for panel placement
-    gridRef,
-    rows,
-    cols,
-    rowSizes,
-    colSizes,
-
-    visiblePanels,
-    // ✅ do NOT pass Grid-owned stacksByCell anymore
-  });
+  } = coord;
 
   const containersRender = getWorkingContainers?.() ?? state?.containers ?? [];
   const panelsRender = getWorkingPanels?.() ?? visiblePanels;
+  const allPanelsRender =
+    getWorkingAllPanels?.() ?? (state?.panels ?? visiblePanels);
 
   const panelsById = useMemo(() => {
     const m = Object.create(null);
-    for (const p of panelsRender || []) m[p.id] = p;
+    for (const p of allPanelsRender || []) m[p.id] = p;
     return m;
-  }, [panelsRender]);
+  }, [allPanelsRender]);
 
-  const getPanel = useCallback((id) => panelsRender.find((p) => p.id === id), [panelsRender]);
+  const getPanel = useCallback(
+    (id) => (allPanelsRender || []).find((p) => p.id === id),
+    [allPanelsRender]
+  );
 
   // ✅ stacksByCell for fullscreen/dropdowns (draft-aware)
-  const stacksByCell = useMemo(() => getStacksByCell?.() || {}, [getStacksByCell, dragTick]);
+  const stacksByCell = useMemo(
+    () => getStacksByCell?.() || {},
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [getStacksByCell, dragTick]
+  );
 
   // -----------------------------
   // ✅ Grid resizing commit
@@ -538,14 +571,19 @@ function GridInner({ components }) {
       sizesRef,
       containersById,
 
-      // ✅ unified hover surface
+      // ✅ centralized hover surface
       hotTarget,
+
       isContainerDrag,
       isInstanceDrag,
 
       // ✅ stack actions from coordinator
       onSelectStackPanel: setActivePanelInCell,
       onCycleStack: cyclePanelStack,
+
+      // (optional debug: NOT used by Panel UI)
+      getHoveredPanelId,
+      getHoveredContainerId,
 
       dispatch,
       socket,
@@ -559,11 +597,15 @@ function GridInner({ components }) {
       containersById,
 
       hotTarget,
+
       isContainerDrag,
       isInstanceDrag,
 
       setActivePanelInCell,
       cyclePanelStack,
+
+      getHoveredPanelId,
+      getHoveredContainerId,
 
       dispatch,
       socket,
@@ -571,17 +613,11 @@ function GridInner({ components }) {
     ]
   );
 
-
-
-  // If you want to hard-reset dnd when exiting fullscreen,
-  // let the coordinator decide; Grid no longer forces key resets.
-  const dndKey = 0;
   const activeSize = state.activeSize;
 
   return (
     <>
       <DndContext
-        key={dndKey}
         sensors={sensors}
         collisionDetection={collisionDetection}
         measuring={{
@@ -598,7 +634,6 @@ function GridInner({ components }) {
           acceleration: 25,
         }}
         onDragStart={onDragStart}
-        onDragMove={onDragMove}
         onDragOver={onDragOver}
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
@@ -668,7 +703,11 @@ function GridInner({ components }) {
 
           {activeId && activeRole === "instance" && activeInstance ? (
             <div className="instance-overlay" style={{ pointerEvents: "none" }}>
-              <InstanceComp id={activeInstance.id} label={activeInstance.label} overlay />
+              <InstanceComp
+                id={activeInstance.id}
+                label={activeInstance.label}
+                overlay
+              />
             </div>
           ) : null}
         </DragOverlay>
@@ -682,6 +721,7 @@ function GridInner({ components }) {
           panelProps={panelProps}
           cols={cols}
           rows={rows}
+          stacksByCell={stacksByCell}
         />
       </DndContext>
     </>

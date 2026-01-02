@@ -36,16 +36,12 @@ function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
 export default function App() {
   const { state, dispatch } = useBoardState();
 
-  // ✅ instance lookup map once
   const instancesById = useMemo(() => {
     const m = Object.create(null);
     for (const inst of state.instances || []) m[inst.id] = inst;
     return m;
   }, [state.instances]);
 
-  // -----------------------------
-  // TOOLBAR LOCAL UI STATE
-  // -----------------------------
   const [gridName, setGridName] = useState("");
   const [rowInput, setRowInput] = useState("1");
   const [colInput, setColInput] = useState("1");
@@ -62,9 +58,6 @@ export default function App() {
     }
   }, [state?.grid?._id, state?.grid?.name, state?.grid?.rows, state?.grid?.cols]);
 
-  // -----------------------------
-  // SOCKET BIND + HYDRATE
-  // -----------------------------
   useEffect(() => {
     const unbind = bindSocketToStore(socket, dispatch);
 
@@ -77,7 +70,10 @@ export default function App() {
       didRequest = true;
 
       const savedGridId = localStorage.getItem("moduli-gridId");
-      socket.emit("request_full_state", savedGridId ? { gridId: savedGridId } : undefined);
+      socket.emit(
+        "request_full_state",
+        savedGridId ? { gridId: savedGridId } : undefined
+      );
     };
 
     if (socket.connected) request();
@@ -89,9 +85,6 @@ export default function App() {
     };
   }, [dispatch]);
 
-  // -----------------------------
-  // TOOLBAR HANDLERS
-  // -----------------------------
   const handleGridChange = (e) => {
     const newGridId = e.target.value;
     if (!newGridId || newGridId === state.gridId) return;
@@ -119,7 +112,7 @@ export default function App() {
         dispatch,
         socket,
         gridId,
-        grid: { name: trimmed }, // ✅ PATCH
+        grid: { name: trimmed },
         emit: true,
       });
     },
@@ -137,7 +130,7 @@ export default function App() {
         dispatch,
         socket,
         gridId,
-        grid: { rows: num }, // ✅ PATCH
+        grid: { rows: num },
         emit: true,
       });
     },
@@ -155,7 +148,7 @@ export default function App() {
         dispatch,
         socket,
         gridId,
-        grid: { cols: num }, // ✅ PATCH
+        grid: { cols: num },
         emit: true,
       });
     },
@@ -197,10 +190,8 @@ export default function App() {
       const label = `List ${(state.containers?.length || 0) + 1}`;
       const container = { id, label, items: [] };
 
-      // 1) create container (hard)
       CommitHelpers.createContainer({ dispatch, socket, container, emit: true });
 
-      // 2) attach to panel (hard)
       const panel = (state.panels || []).find((p) => p.id === panelId);
       if (!panel) return;
 
@@ -215,6 +206,7 @@ export default function App() {
     [dispatch, state.gridId, state.containers, state.panels]
   );
 
+  // ✅ UPDATED: use the server-supported atomic event
   const addInstanceToContainer = useCallback(
     (containerId) => {
       if (!containerId) return;
@@ -223,25 +215,16 @@ export default function App() {
       const label = `Item ${(state.instances?.length || 0) + 1}`;
       const instance = { id, label };
 
-      // ✅ If you DON'T have LayoutHelpers.createInstanceInContainer,
-      // do it explicitly here using CommitHelpers + LayoutHelpers.addInstanceToContainer
-
-      // 1) create instance (hard)
-      CommitHelpers.createInstance({ dispatch, socket, instance, emit: true });
-
-      // 2) attach to container (hard)
-      const container = (state.containers || []).find((c) => c.id === containerId);
-      if (!container) return;
-
-      LayoutHelpers.addInstanceToContainer({
+      // preferred atomic path (upsert instance + attach to container)
+      CommitHelpers.createInstanceInContainer({
         dispatch,
         socket,
-        container,
-        instanceId: id,
+        containerId,
+        instance,
         emit: true,
       });
     },
-    [dispatch, state.instances, state.containers]
+    [dispatch, state.instances]
   );
 
   const deleteGridFinal = useCallback(() => {
@@ -251,9 +234,6 @@ export default function App() {
     CommitHelpers.deleteGrid({ dispatch, socket, gridId, emit: true });
   }, [dispatch, state?.gridId, state?.grid?._id]);
 
-  // -----------------------------
-  // CONTEXT VALUES
-  // -----------------------------
   const dataValue = useMemo(
     () => ({
       state: {
@@ -326,7 +306,11 @@ export default function App() {
         />
 
         <div className="app-root grid-frame bg-background2 ring-1 ring-black/40 rounded-xl p-3 shadow-inner border border-border">
-          {state.grid?._id ? <Grid components={components} /> : <SpinnerOverlay label="Syncing grid…" />}
+          {state.grid?._id ? (
+            <Grid components={components} />
+          ) : (
+            <SpinnerOverlay label="Syncing grid…" />
+          )}
         </div>
       </GridDataContext.Provider>
     </GridActionsContext.Provider>

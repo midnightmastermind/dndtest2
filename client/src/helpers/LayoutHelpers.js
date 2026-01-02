@@ -2,9 +2,18 @@
 import * as CommitHelpers from "./CommitHelpers";
 
 // ============================================================================
+// INTERNAL
+// ============================================================================
+function normalizeId(doc) {
+  if (!doc) return doc;
+  if (doc.id) return doc;
+  if (doc._id) return { ...doc, id: String(doc._id) };
+  return doc;
+}
+
+// ============================================================================
 // LIST UTILS (pure)
 // ============================================================================
-
 export function removeId(list = [], id) {
   return (list || []).filter((x) => x !== id);
 }
@@ -32,8 +41,7 @@ export function arrayMove(list = [], from, to) {
 }
 
 // ============================================================================
-// GRID / PANEL / CONTAINER / INSTANCE MUTATORS (commit helpers)
-// Contract: "update only the owning doc" (grid owns panel ids, panel owns container ids, container owns instance ids)
+// GRID / PANEL / CONTAINER / INSTANCE MUTATORS
 // ============================================================================
 
 // ------------------------
@@ -42,17 +50,17 @@ export function arrayMove(list = [], from, to) {
 export function addPanelToGrid({ dispatch, socket, grid, panelId, emit = true }) {
   if (!grid || !panelId) return;
   const updatedGrid = { ...grid, panels: ensureId(grid.panels || [], panelId) };
-  const gridId = grid?._id ?? grid?.id;
+  const gridId = updatedGrid?._id ?? updatedGrid?.id;
   if (!gridId) return;
-  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
+  CommitHelpers.updateGrid({ dispatch, socket, gridId: String(gridId), grid: updatedGrid, emit });
 }
 
 export function removePanelFromGrid({ dispatch, socket, grid, panelId, emit = true }) {
   if (!grid || !panelId) return;
   const updatedGrid = { ...grid, panels: removeId(grid.panels || [], panelId) };
-  const gridId = grid?._id ?? grid?.id;
+  const gridId = updatedGrid?._id ?? updatedGrid?.id;
   if (!gridId) return;
-  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
+  CommitHelpers.updateGrid({ dispatch, socket, gridId: String(gridId), grid: updatedGrid, emit });
 }
 
 // ------------------------
@@ -70,31 +78,58 @@ export function addContainerToPanel({
 
   const list = panel.containers || [];
   const nextList =
-    index == null ? ensureId(list, containerId) : insertAt(removeId(list, containerId), index, containerId);
+    index == null
+      ? ensureId(list, containerId)
+      : insertAt(removeId(list, containerId), index, containerId);
 
-  const updatedPanel = { ...panel, containers: nextList };
+  const updatedPanel = normalizeId({ ...panel, containers: nextList });
   CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel, emit });
 }
 
-export function removeContainerFromPanel({ dispatch, socket, panel, containerId, emit = true }) {
+export function removeContainerFromPanel({
+  dispatch,
+  socket,
+  panel,
+  containerId,
+  emit = true,
+}) {
   if (!panel || !containerId) return;
-  const updatedPanel = { ...panel, containers: removeId(panel.containers || [], containerId) };
+  const updatedPanel = normalizeId({
+    ...panel,
+    containers: removeId(panel.containers || [], containerId),
+  });
   CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel, emit });
 }
 
-export function reorderContainersInPanel({ dispatch, socket, panel, fromIndex, toIndex, emit = true }) {
+export function reorderContainersInPanel({
+  dispatch,
+  socket,
+  panel,
+  fromIndex,
+  toIndex,
+  emit = true,
+}) {
   if (!panel) return;
   const next = arrayMove(panel.containers || [], fromIndex, toIndex);
-  const updatedPanel = { ...panel, containers: next };
+  const updatedPanel = normalizeId({ ...panel, containers: next });
   CommitHelpers.updatePanel({ dispatch, socket, panel: updatedPanel, emit });
 }
-export function setPanelStackDisplay({ dispatch, socket, panel, display }) {
-  if (!panel?.id) return;
 
-  const curr = panel.layout || {};
-  const style = (curr.style && typeof curr.style === "object") ? curr.style : {};
+export function setPanelStackDisplay({
+  dispatch,
+  socket,
+  panel,
+  display,
+  emit = true,
+}) {
+  const p = normalizeId(panel);
+  if (!p?.id) return;
+
+  const curr = p.layout || {};
+  const style = curr.style && typeof curr.style === "object" ? curr.style : {};
+
   const nextPanel = {
-    ...panel,
+    ...p,
     layout: {
       ...curr,
       style: {
@@ -104,7 +139,7 @@ export function setPanelStackDisplay({ dispatch, socket, panel, display }) {
     },
   };
 
-  CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel, emit: true });
+  CommitHelpers.updatePanel({ dispatch, socket, panel: nextPanel, emit });
 }
 
 // ------------------------
@@ -122,15 +157,26 @@ export function addInstanceToContainer({
 
   const list = container.items || [];
   const nextList =
-    index == null ? ensureId(list, instanceId) : insertAt(removeId(list, instanceId), index, instanceId);
+    index == null
+      ? ensureId(list, instanceId)
+      : insertAt(removeId(list, instanceId), index, instanceId);
 
-  const updatedContainer = { ...container, items: nextList };
+  const updatedContainer = normalizeId({ ...container, items: nextList });
   CommitHelpers.updateContainer({ dispatch, socket, container: updatedContainer, emit });
 }
 
-export function removeInstanceFromContainer({ dispatch, socket, container, instanceId, emit = true }) {
+export function removeInstanceFromContainer({
+  dispatch,
+  socket,
+  container,
+  instanceId,
+  emit = true,
+}) {
   if (!container || !instanceId) return;
-  const updatedContainer = { ...container, items: removeId(container.items || [], instanceId) };
+  const updatedContainer = normalizeId({
+    ...container,
+    items: removeId(container.items || [], instanceId),
+  });
   CommitHelpers.updateContainer({ dispatch, socket, container: updatedContainer, emit });
 }
 
@@ -144,12 +190,12 @@ export function reorderInstancesInContainer({
 }) {
   if (!container) return;
   const next = arrayMove(container.items || [], fromIndex, toIndex);
-  const updatedContainer = { ...container, items: next };
+  const updatedContainer = normalizeId({ ...container, items: next });
   CommitHelpers.updateContainer({ dispatch, socket, container: updatedContainer, emit });
 }
 
 // ------------------------
-// MOVE HELPERS (two-doc commits: remove from source + add to dest)
+// MOVE HELPERS (two-doc commits)
 // ------------------------
 export function moveContainerBetweenPanels({
   dispatch,
@@ -162,14 +208,18 @@ export function moveContainerBetweenPanels({
 }) {
   if (!fromPanel || !toPanel || !containerId) return;
 
-  const fromNext = { ...fromPanel, containers: removeId(fromPanel.containers || [], containerId) };
-  const toNext = {
+  const fromNext = normalizeId({
+    ...fromPanel,
+    containers: removeId(fromPanel.containers || [], containerId),
+  });
+
+  const toNext = normalizeId({
     ...toPanel,
     containers:
       toIndex == null
         ? ensureId(toPanel.containers || [], containerId)
         : insertAt(removeId(toPanel.containers || [], containerId), toIndex, containerId),
-  };
+  });
 
   CommitHelpers.updatePanel({ dispatch, socket, panel: fromNext, emit });
   CommitHelpers.updatePanel({ dispatch, socket, panel: toNext, emit });
@@ -186,27 +236,44 @@ export function moveInstanceBetweenContainers({
 }) {
   if (!fromContainer || !toContainer || !instanceId) return;
 
-  const fromNext = { ...fromContainer, items: removeId(fromContainer.items || [], instanceId) };
-  const toNext = {
+  const fromNext = normalizeId({
+    ...fromContainer,
+    items: removeId(fromContainer.items || [], instanceId),
+  });
+
+  const toNext = normalizeId({
     ...toContainer,
     items:
       toIndex == null
         ? ensureId(toContainer.items || [], instanceId)
         : insertAt(removeId(toContainer.items || [], instanceId), toIndex, instanceId),
-  };
+  });
 
   CommitHelpers.updateContainer({ dispatch, socket, container: fromNext, emit });
   CommitHelpers.updateContainer({ dispatch, socket, container: toNext, emit });
 }
 
 // ============================================================================
-// GRID RESIZE (unchanged)
+// ATOMIC “create instance in container” helper (preferred)
+// ============================================================================
+export function createInstanceInContainer({
+  dispatch,
+  socket,
+  containerId,
+  instance,
+  emit = true,
+}) {
+  if (!containerId || !instance?.id) return;
+  CommitHelpers.createInstanceInContainer({ dispatch, socket, containerId, instance, emit });
+}
+
+// ============================================================================
+// GRID RESIZE
 // ============================================================================
 export function resizeGrid({ dispatch, socket, grid, rows, cols, emit = true }) {
   if (!grid) return;
   const updatedGrid = { ...grid, rows, cols };
-  const gridId = grid?._id ?? grid?.id;
+  const gridId = updatedGrid?._id ?? updatedGrid?.id;
   if (!gridId) return;
-  CommitHelpers.updateGrid({ dispatch, socket, gridId, grid: updatedGrid, emit });
-
+  CommitHelpers.updateGrid({ dispatch, socket, gridId: String(gridId), grid: updatedGrid, emit });
 }
