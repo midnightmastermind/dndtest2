@@ -112,7 +112,7 @@ function SortableContainerInner({
   const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
 
   return (
-    return (
+  
   <div
     ref={setNodeRef}
     data-container-id={container.id} // ✅ REQUIRED for getHoveredContainerId()

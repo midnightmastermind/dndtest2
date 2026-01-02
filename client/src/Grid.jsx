@@ -1,7 +1,10 @@
-// GridInner.jsx — UPDATED (Grid is dumb: render + resize + wire DnDContext)
-// ✅ DnDKit + native/cross-window drag logic lives in useDnDControlCoordinator
-// ✅ Grid only wires DndContext to coordinator outputs + renders overlays/canvas
-// ✅ Stacks are draft-aware and owned by coordinator (no Grid commits / repairs)
+// GridInner.jsx — MERGED (wire coordinator hotTarget + panel cell droppables + fullscreen overlay)
+// Notes:
+// - Grid stays dumb: sizing + render + DndContext wiring
+// - Coordinator owns: preview draft, hotTarget, stacks, native bridge, commits
+// - ✅ CellDroppable only enabled during panel drags
+// - ✅ Pass hotTarget + stack actions into Panel via panelProps
+// - ✅ Hide in-grid panels during fullscreen; FullscreenOverlay renders the active panel
 
 import React, {
   useContext,
@@ -11,8 +14,7 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import { useDroppable, DndContext, DragOverlay } from "@dnd-kit/core";
-import { MeasuringStrategy } from "@dnd-kit/core";
+import { useDroppable, DndContext, DragOverlay, MeasuringStrategy } from "@dnd-kit/core";
 import { snapCenterToCursor } from "@dnd-kit/modifiers";
 
 import Panel from "./Panel";
@@ -33,10 +35,7 @@ function ContainerClone({ container }) {
   if (!container) return null;
 
   return (
-    <div
-      className="container-shell"
-      style={{ pointerEvents: "none", opacity: 0.95 }}
-    >
+    <div className="container-shell" style={{ pointerEvents: "none", opacity: 0.95 }}>
       <div className="container-header">
         <div style={{ paddingLeft: 6 }}>
           <GripVertical className="h-4 w-4 text-white" />
@@ -47,14 +46,7 @@ function ContainerClone({ container }) {
       </div>
 
       <div className="container-list" style={{ minHeight: 60 }}>
-        <div
-          style={{
-            fontSize: 12,
-            opacity: 0.6,
-            fontStyle: "italic",
-            padding: 8,
-          }}
-        >
+        <div style={{ fontSize: 12, opacity: 0.6, fontStyle: "italic", padding: 8 }}>
           Dragging…
         </div>
       </div>
@@ -65,13 +57,7 @@ function ContainerClone({ container }) {
 /* ------------------------------------------------------------
    DROPPABLE GRID CELL
 ------------------------------------------------------------ */
-const CellDroppable = React.memo(function CellDroppable({
-  r,
-  c,
-  dark,
-  highlight,
-  disabled,
-}) {
+const CellDroppable = React.memo(function CellDroppable({ r, c, dark, highlight, disabled }) {
   const { setNodeRef } = useDroppable({
     id: `cell-${r}-${c}`,
     disabled,
@@ -157,13 +143,7 @@ function GridCanvas({
               disabled={false}
             />
           ) : (
-            <CellStatic
-              key={cellId}
-              r={r}
-              c={c}
-              dark={dark}
-              highlight={highlight}
-            />
+            <CellStatic key={cellId} r={r} c={c} dark={dark} highlight={highlight} />
           )
         );
       }
@@ -235,7 +215,7 @@ function GridCanvas({
         />
       ))}
 
-      {/* Panels */}
+      {/* Panels (hidden during fullscreen — overlay renders the active one) */}
       {visiblePanels.map((p) => {
         if (fullscreenPanelId !== null) return null;
 
@@ -384,7 +364,7 @@ function GridInner({ components }) {
     // ✅ centralized hover surface
     hotTarget,
 
-    // (optional debug)
+    // optional debug
     getHoveredPanelId,
     getHoveredContainerId,
 
@@ -394,8 +374,7 @@ function GridInner({ components }) {
 
   const containersRender = getWorkingContainers?.() ?? state?.containers ?? [];
   const panelsRender = getWorkingPanels?.() ?? visiblePanels;
-  const allPanelsRender =
-    getWorkingAllPanels?.() ?? (state?.panels ?? visiblePanels);
+  const allPanelsRender = getWorkingAllPanels?.() ?? (state?.panels ?? visiblePanels);
 
   const panelsById = useMemo(() => {
     const m = Object.create(null);
@@ -581,7 +560,7 @@ function GridInner({ components }) {
       onSelectStackPanel: setActivePanelInCell,
       onCycleStack: cyclePanelStack,
 
-      // (optional debug: NOT used by Panel UI)
+      // optional debug (Panel does not use these for UI)
       getHoveredPanelId,
       getHoveredContainerId,
 
@@ -595,18 +574,13 @@ function GridInner({ components }) {
       instancesById,
       sizesRef,
       containersById,
-
       hotTarget,
-
       isContainerDrag,
       isInstanceDrag,
-
       setActivePanelInCell,
       cyclePanelStack,
-
       getHoveredPanelId,
       getHoveredContainerId,
-
       dispatch,
       socket,
       gridRef,
@@ -703,16 +677,12 @@ function GridInner({ components }) {
 
           {activeId && activeRole === "instance" && activeInstance ? (
             <div className="instance-overlay" style={{ pointerEvents: "none" }}>
-              <InstanceComp
-                id={activeInstance.id}
-                label={activeInstance.label}
-                overlay
-              />
+              <InstanceComp id={activeInstance.id} label={activeInstance.label} overlay />
             </div>
           ) : null}
         </DragOverlay>
 
-        {/* ✅ Fullscreen overlay is OUTSIDE the grid DOM + DnD overlays */}
+        {/* ✅ Fullscreen overlay is OUTSIDE the grid DOM */}
         <FullscreenOverlay
           fullscreenPanelId={fullscreenPanelId}
           setFullscreenPanelId={setFullscreenPanelId}

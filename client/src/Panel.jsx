@@ -1,4 +1,10 @@
-// Panel.jsx — UPDATED: CommitHelpers emit-flag + centralized hover + stack UI fixes
+// Panel.jsx — MERGED (centralized hover + data-panel-id + stack UI + emit-flag + shell droppable)
+// Notes:
+// - Uses coordinator-provided hotTarget (NO hit-testing here)
+// - Shell is BOTH draggable + droppable (panel:drop)
+// - data-panel-id is required for native/cross-window + hover fallback
+// - Stack UI calls coordinator hooks: onSelectStackPanel(row,col,id) and onCycleStack({panelId,dir})
+
 import React, { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import ResizeHandle from "./ResizeHandle";
@@ -89,7 +95,6 @@ function getDefaultLayout() {
 function mergeLayout(panelLayout) {
   const base = getDefaultLayout();
   const next = panelLayout && typeof panelLayout === "object" ? panelLayout : {};
-
   return {
     ...base,
     ...next,
@@ -121,8 +126,8 @@ function Panel({
   cols,
   rows,
 
-  // ✅ Centralized hover surface from coordinator (single source of truth)
-  hotTarget, // { role, panelId, containerId, instanceId?, ... } | null
+  // ✅ Centralized hover surface from coordinator
+  hotTarget, // { role, panelId, containerId, overInstanceId } | null
 
   isContainerDrag,
   isInstanceDrag,
@@ -136,9 +141,9 @@ function Panel({
   forceFullscreen = false,
 
   // ✅ stacking UI support (coordinator-owned)
-  onSelectStackPanel, // optional: (row, col, nextPanelId) => void
+  onSelectStackPanel, // (row, col, nextPanelId) => void
   onCycleStack, // ({ panelId, dir }) => void
-  stackPanels, // stack list for this cell
+  stackPanels, // stack list for this cell (includes hidden)
 }) {
   // ----------------------------------------------------------
   // ✅ Layout: derive from panel.layout + debounced backend write
@@ -146,9 +151,7 @@ function Panel({
   const layout = useMemo(() => mergeLayout(panel?.layout), [panel?.layout]);
   const layoutSaveTimer = useRef(null);
 
-  useEffect(() => {
-    return () => window.clearTimeout(layoutSaveTimer.current);
-  }, []);
+  useEffect(() => () => window.clearTimeout(layoutSaveTimer.current), []);
 
   const commitPanelLayout = useCallback(
     (nextLayout) => {
@@ -165,12 +168,7 @@ function Panel({
         display: incomingStyle.display ?? (currStyle.display ?? "block"),
       };
 
-      const merged = mergeLayout({
-        ...curr,
-        ...incoming,
-        style: preservedStyle,
-      });
-
+      const merged = mergeLayout({ ...curr, ...incoming, style: preservedStyle });
       const nextPanel = { ...panel, layout: merged };
 
       window.clearTimeout(layoutSaveTimer.current);
@@ -200,12 +198,7 @@ function Panel({
         display: incomingStyle.display ?? (currStyle.display ?? "block"),
       };
 
-      const merged = mergeLayout({
-        ...curr,
-        ...incoming,
-        style: preservedStyle,
-      });
-
+      const merged = mergeLayout({ ...curr, ...incoming, style: preservedStyle });
       const nextPanel = { ...panel, layout: merged };
 
       // soft commit (dispatch only)
@@ -217,7 +210,6 @@ function Panel({
       });
 
       window.clearTimeout(layoutSaveTimer.current);
-
       layoutSaveTimer.current = window.setTimeout(() => {
         CommitHelpers.updatePanel({
           dispatch: null,
@@ -266,11 +258,9 @@ function Panel({
 
   const collapsed = false;
 
-  // ✅ centralized hover check (don’t hit-test here)
+  // ✅ centralized hover check (no hit-testing here)
   const isHotPanel = (hotTarget?.panelId ?? null) === panel.id;
-
-  const highlightPanel =
-    isContainerDrag && (isOverPanelDrop || isHotPanel) && !collapsed;
+  const highlightPanel = isContainerDrag && (isOverPanelDrop || isHotPanel) && !collapsed;
 
   const data = useMemo(
     () => ({
@@ -430,7 +420,7 @@ function Panel({
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
-  // ✅ “hot” child info for container UI
+  // ✅ hot child info for container UI
   const hotId = isHotPanel ? hotTarget?.containerId ?? null : null;
   const hotRole = isHotPanel ? hotTarget?.role ?? "" : "";
 
@@ -467,7 +457,6 @@ function Panel({
   const stackList = Array.isArray(stackPanels) ? stackPanels : null;
   const hasStack = !isFullscreen && !!stackList && stackList.length > 1;
 
-  // show chevrons if we can cycle; dropdown only if selector exists
   const canCycle = hasStack && typeof onCycleStack === "function";
   const canSelect = hasStack && typeof onSelectStackPanel === "function";
 
@@ -518,12 +507,7 @@ function Panel({
           {hasStack ? (
             <div
               className="panel-selector"
-              style={{
-                display: "flex",
-                justifyContent: "start",
-                alignItems: "center",
-                maxWidth: 260,
-              }}
+              style={{ display: "flex", justifyContent: "start", alignItems: "center", maxWidth: 260 }}
             >
               <Button
                 variant="ghost"
@@ -552,18 +536,14 @@ function Panel({
                     key: "activePanelId",
                     placeholder: "Select panel…",
                     options: stackList.map((p, idx) => {
-                      const name =
-                        p?.layout?.name || p?.layout?.name === "" ? p.layout.name : "";
-                      const label = name?.trim() ? name : `Panel ${idx + 1}`;
+                      const name = p?.layout?.name ?? "";
+                      const label = String(name || "").trim() ? name : `Panel ${idx + 1}`;
                       return { value: p.id, label };
                     }),
                   }}
                 />
               ) : (
-                <div
-                  className="font-mono text-[10px] sm:text-xs"
-                  style={{ fontWeight: 500, paddingLeft: 3 }}
-                >
+                <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
                   {panel?.layout?.name}
                 </div>
               )}
@@ -583,10 +563,7 @@ function Panel({
               </Button>
             </div>
           ) : (
-            <div
-              className="font-mono text-[10px] sm:text-xs"
-              style={{ fontWeight: 500, paddingLeft: 3 }}
-            >
+            <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
               {panel?.layout?.name}
             </div>
           )}
@@ -596,7 +573,7 @@ function Panel({
               <LayoutForm
                 value={layout}
                 onChange={setLayout}
-                onCommit={(nextLayout) => commitPanelLayout(nextLayout)}
+                onCommit={commitPanelLayout}
                 onDeletePanel={deletePanelFinal}
                 panelId={panel.id}
               />
@@ -616,11 +593,7 @@ function Panel({
                 isFullscreen ? closeFullscreen() : openFullscreen();
               }}
             >
-              {isFullscreen ? (
-                <Minimize className="h-4 w-4" />
-              ) : (
-                <Maximize className="h-4 w-4" />
-              )}
+              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
             </Button>
           </div>
         </div>
@@ -638,21 +611,13 @@ function Panel({
         >
           <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
-          <SortableContext
-            items={panelContainerIds}
-            strategy={rectSortingStrategy}
-            disabled={isInstanceDrag}
-          >
+          <SortableContext items={panelContainerIds} strategy={rectSortingStrategy} disabled={isInstanceDrag}>
             <ListWrapper
               className="h-full w-full"
               display={layout.display}
               flow={layout.flow}
               wrap={layout.display === "flex" ? layout.wrap ?? "wrap" : undefined}
-              columns={
-                layout.display === "grid" || layout.display === "columns"
-                  ? layout.columns
-                  : 0
-              }
+              columns={layout.display === "grid" || layout.display === "columns" ? layout.columns : 0}
               rows={layout.display === "grid" ? layout.rows : 0}
               alignContent={layout.alignContent}
               alignItems={layout.alignItems}
@@ -692,9 +657,7 @@ function Panel({
               ))}
 
               {panelContainers.length === 0 && !isContainerDrag && (
-                <div className="mt-3 opacity-70 text-[13px]">
-                  Create a container to start.
-                </div>
+                <div className="mt-3 opacity-70 text-[13px]">Create a container to start.</div>
               )}
             </ListWrapper>
           </SortableContext>
@@ -711,10 +674,8 @@ function Panel({
 export default React.memo(Panel, (prev, next) => {
   if (prev.panel?.id !== next.panel?.id) return false;
 
-  const prevIsFullscreen =
-    !!prev.forceFullscreen || prev.fullscreenPanelId === prev.panel?.id;
-  const nextIsFullscreen =
-    !!next.forceFullscreen || next.fullscreenPanelId === next.panel?.id;
+  const prevIsFullscreen = !!prev.forceFullscreen || prev.fullscreenPanelId === prev.panel?.id;
+  const nextIsFullscreen = !!next.forceFullscreen || next.fullscreenPanelId === next.panel?.id;
   if (prevIsFullscreen !== nextIsFullscreen) return false;
 
   if (prev.panel?.row !== next.panel?.row) return false;
@@ -734,9 +695,7 @@ export default React.memo(Panel, (prev, next) => {
   const prevWasAffected = prev.panel?.id === prevHotPanel;
   const nextIsAffected = next.panel?.id === nextHotPanel;
 
-  if (!prevWasAffected && !nextIsAffected) {
-    // ignore hotTarget changes for non-affected panels
-  } else {
+  if (prevWasAffected || nextIsAffected) {
     if (prev.hotTarget?.containerId !== next.hotTarget?.containerId) return false;
     if (prev.hotTarget?.role !== next.hotTarget?.role) return false;
   }

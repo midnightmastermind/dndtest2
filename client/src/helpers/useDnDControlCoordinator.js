@@ -11,6 +11,10 @@
 // IMPORTANT:
 // - Panel roots render:     data-panel-id={panel.id}
 // - Container roots render: data-container-id={container.id}
+//
+// ✅ FIX MERGE:
+// - If dnd-kit "over" becomes null (pointer in gaps / left droppables), preview now REVERTS
+//   back to the start snapshot so you don't get "stuck preview" in the last container/panel.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -237,27 +241,31 @@ export function useDnDControlCoordinator({
     const totalCols = (colSizes || []).reduce((a, b) => a + b, 0) || 1;
     const totalRows = (rowSizes || []).reduce((a, b) => a + b, 0) || 1;
 
+    // ✅ FIX: correct binning so we don't "stick" in col 0/row 0
     let acc = 0;
     let col = 0;
     for (let i = 0; i < (colSizes || []).length; i++) {
       acc += colSizes[i];
-      if (relX < acc / totalCols) break;
-      col = i;
+      if (relX <= acc / totalCols) {
+        col = i;
+        break;
+      }
     }
 
     acc = 0;
     let row = 0;
     for (let i = 0; i < (rowSizes || []).length; i++) {
       acc += rowSizes[i];
-      if (relY < acc / totalRows) break;
-      row = i;
+      if (relY <= acc / totalRows) {
+        row = i;
+        break;
+      }
     }
 
-    return {
-      row: clamp(row, 0, rows - 1),
-      col: clamp(col, 0, cols - 1),
-      cellId: `cell-${clamp(row, 0, rows - 1)}-${clamp(col, 0, cols - 1)}`,
-    };
+    const rr = clamp(row, 0, rows - 1);
+    const cc = clamp(col, 0, cols - 1);
+
+    return { row: rr, col: cc, cellId: `cell-${rr}-${cc}` };
   }, [gridRef, rows, cols, rowSizes, colSizes]);
 
   // ============================================================
@@ -288,35 +296,30 @@ export function useDnDControlCoordinator({
   // ============================================================
   // Centralized hover surface (hotTarget)
   // ============================================================
-  const setHotTarget = useCallback(
-    ({ role, panelId, containerId, overInstanceId } = {}) => {
-      const next = {
-        role: role || "",
-        panelId: panelId ?? null,
-        containerId: containerId ?? null,
-        overInstanceId: overInstanceId ?? null,
-      };
+  const setHotTarget = useCallback(({ role, panelId, containerId, overInstanceId } = {}) => {
+    const next = {
+      role: role || "",
+      panelId: panelId ?? null,
+      containerId: containerId ?? null,
+      overInstanceId: overInstanceId ?? null,
+    };
 
-      const prev = hotTargetRef.current;
-      const same =
-        prev &&
-        prev.role === next.role &&
-        prev.panelId === next.panelId &&
-        prev.containerId === next.containerId &&
-        prev.overInstanceId === next.overInstanceId;
+    const prev = hotTargetRef.current;
+    const same =
+      prev &&
+      prev.role === next.role &&
+      prev.panelId === next.panelId &&
+      prev.containerId === next.containerId &&
+      prev.overInstanceId === next.overInstanceId;
 
-      if (!same) hotTargetRef.current = next;
-    },
-    []
-  );
+    if (!same) hotTargetRef.current = next;
+  }, []);
 
   const refreshHotTarget = useCallback(() => {
     const a = activeRef.current;
     const o = overRef.current;
 
-    // If we have dnd-kit "over", prefer it
     if (o) {
-      // Instance drag: highlight container + panel (if available)
       if (a?.role === "instance") {
         setHotTarget({
           role: o.role || "instance",
@@ -327,7 +330,6 @@ export function useDnDControlCoordinator({
         return;
       }
 
-      // Container drag: highlight panel
       if (a?.role === "container") {
         setHotTarget({
           role: o.role || "container",
@@ -338,7 +340,6 @@ export function useDnDControlCoordinator({
         return;
       }
 
-      // Panel drag: not really a "hot panel", but keep it consistent
       if (a?.role === "panel") {
         setHotTarget({
           role: "panel",
@@ -358,7 +359,6 @@ export function useDnDControlCoordinator({
       return;
     }
 
-    // No dnd-kit "over" (gaps / native): use DOM hit-test fallback
     if (a?.role === "instance" || a?.role === "external") {
       setHotTarget({
         role: a?.role || "external",
@@ -420,6 +420,14 @@ export function useDnDControlCoordinator({
     s.draftContainers = deepCloneContainers(baseContainers);
   }, [basePanels, baseContainers]);
 
+  // ✅ FIX: helper to revert preview back to the "start" snapshot
+  const resetDraftToStart = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s.dragging) return;
+    if (s.startPanels) s.draftPanels = deepClonePanels(s.startPanels);
+    if (s.startContainers) s.draftContainers = deepCloneContainers(s.startContainers);
+  }, []);
+
   const clearDragSession = useCallback(() => {
     const s = sessionRef.current;
     s.dragging = false;
@@ -474,21 +482,22 @@ export function useDnDControlCoordinator({
   const onDragStart = useCallback(
     (evt) => {
       const data = evt.active.data?.current ?? {};
-      activeRef.current = {
-        id: evt.active.id,
-        role: pickRole(data),
-        data,
-      };
+      activeRef.current = { id: evt.active.id, role: pickRole(data), data };
 
       setActiveId(evt.active.id);
       setActiveRole(activeRef.current.role);
 
       ensureDragSession();
 
-      // bootstrap hover once
       hoveredPanelIdRef.current = getHoveredPanelId();
       hoveredContainerIdRef.current = getHoveredContainerId();
       refreshHotTarget();
+
+      if (activeRef.current.role === "panel") {
+        // start with pointer; dnd-kit over will quickly override
+        const cell = getCellFromPointer();
+        setPanelOverCellId(cell?.cellId ?? null);
+      }
 
       scheduleSoftTick?.();
     },
@@ -498,6 +507,7 @@ export function useDnDControlCoordinator({
       getHoveredPanelId,
       getHoveredContainerId,
       refreshHotTarget,
+      getCellFromPointer,
     ]
   );
 
@@ -511,16 +521,26 @@ export function useDnDControlCoordinator({
 
       if (!a) return;
 
-      // Keep DOM hover ids up-to-date too (helps in gaps / native drags)
       hoveredPanelIdRef.current = getHoveredPanelId();
       hoveredContainerIdRef.current = getHoveredContainerId();
 
-      // ✅ central hotTarget update (single source of truth)
       refreshHotTarget();
 
+      // ✅ FIX: leaving droppables => revert preview
       if (!o) {
+        if (s.dragging) resetDraftToStart();
         scheduleSoftTick?.();
         return;
+      }
+
+      // Keep panelOverCellId synced during panel drags (prefer over id!)
+      if (a.role === "panel") {
+        if (typeof evt.over?.id === "string" && String(evt.over.id).startsWith("cell-")) {
+          setPanelOverCellId(String(evt.over.id));
+        } else {
+          const cell = getCellFromPointer();
+          setPanelOverCellId(cell?.cellId ?? null);
+        }
       }
 
       // INSTANCE PREVIEW SORT
@@ -544,7 +564,7 @@ export function useDnDControlCoordinator({
         });
       }
 
-      // CONTAINER PREVIEW SORT (simple: move into panel, append)
+      // CONTAINER PREVIEW SORT
       if (
         ENABLE_CONTAINER_PREVIEW_SORT &&
         a.role === "container" &&
@@ -569,6 +589,8 @@ export function useDnDControlCoordinator({
       getHoveredPanelId,
       getHoveredContainerId,
       refreshHotTarget,
+      resetDraftToStart,
+      getCellFromPointer,
     ]
   );
 
@@ -577,24 +599,99 @@ export function useDnDControlCoordinator({
     const o = overRef.current;
 
     if (!a) return clearDragSession();
+    // Use droppable cell id if we have it, fall back to pointer cell
+    // HARD COMMIT: panel -> cell (+ stack repair source + dest)
+if (a.role === "panel") {
+  const cell = getCellFromPointer();
+  if (cell) {
+    const all = getWorkingAllPanels();
+    const p0 = all.find((x) => x.id === a.id);
 
-    // HARD COMMIT: panel -> cell
-    if (a.role === "panel") {
-      const cell = getCellFromPointer();
-      if (cell) {
-        const p = getWorkingAllPanels().find((x) => x.id === a.id);
-        if (p) {
-          CommitHelpers.updatePanel({
+    if (p0) {
+      const fromRow = p0.row;
+      const fromCol = p0.col;
+      const toRow = cell.row;
+      const toCol = cell.col;
+
+      // no-op if same cell
+      const movedCells = fromRow !== toRow || fromCol !== toCol;
+
+      // 1) commit the moved panel (make it visible in destination)
+      const nextPanel = {
+        ...p0,
+        row: toRow,
+        col: toCol,
+        layout: {
+          ...(p0.layout || {}),
+          style: {
+            ...((p0.layout && p0.layout.style) || {}),
+            display: "block", // ✅ ensure dragged panel is the visible one
+          },
+        },
+      };
+
+      CommitHelpers.updatePanel({
+        dispatch,
+        socket,
+        panel: nextPanel,
+        emit: true,
+      });
+
+      if (movedCells) {
+        // Build "post-move" snapshot to reason about stacks
+        const post = all.map((x) => (x.id === a.id ? nextPanel : x));
+
+        const sourceCellKey = `cell-${fromRow}-${fromCol}`;
+        const destCellKey = `cell-${toRow}-${toCol}`;
+
+        const inCell = (panel, key) => `cell-${panel.row}-${panel.col}` === key;
+
+        const sourceStack = post.filter((x) => x.id !== a.id && inCell(x, sourceCellKey));
+        const destStack = post.filter((x) => x.id !== a.id && inCell(x, destCellKey));
+
+        // 2) SOURCE REPAIR: if there are panels left behind, make one visible
+        if (sourceStack.length) {
+          // choose the first (you can choose by order if you have it)
+          const makeVisible = sourceStack[0];
+
+          // make chosen visible
+          LayoutHelpers.setPanelStackDisplay({
             dispatch,
             socket,
-            panel: { ...p, row: cell.row, col: cell.col },
+            panel: makeVisible,
+            display: "block",
+            emit: true,
+          });
+
+          // keep the rest hidden
+          for (const other of sourceStack) {
+            if (other.id === makeVisible.id) continue;
+            LayoutHelpers.setPanelStackDisplay({
+              dispatch,
+              socket,
+              panel: other,
+              display: "none",
+              emit: true,
+            });
+          }
+        }
+
+        // 3) DEST REPAIR: keep dragged panel visible, hide other panels in dest cell
+        for (const other of destStack) {
+          LayoutHelpers.setPanelStackDisplay({
+            dispatch,
+            socket,
+            panel: other,
+            display: "none",
             emit: true,
           });
         }
       }
     }
+  }
+}
 
-    // HARD COMMIT: container -> panel
+    // ✅ HARD COMMIT: container -> panel
     if (a.role === "container" && o?.panelId) {
       LayoutHelpers.moveContainerBetweenPanels({
         dispatch,
@@ -606,7 +703,7 @@ export function useDnDControlCoordinator({
       });
     }
 
-    // HARD COMMIT: instance -> container
+    // ✅ HARD COMMIT: instance -> container
     if (a.role === "instance" && o?.containerId) {
       LayoutHelpers.moveInstanceBetweenContainers({
         dispatch,
@@ -621,6 +718,7 @@ export function useDnDControlCoordinator({
     clearDragSession();
     setActiveId(null);
     setActiveRole(null);
+    setPanelOverCellId(null);
   }, [
     dispatch,
     socket,
@@ -628,7 +726,15 @@ export function useDnDControlCoordinator({
     getWorkingAllPanels,
     getWorkingContainers,
     clearDragSession,
+    panelOverCellId,
   ]);
+
+  const onDragCancel = useCallback(() => {
+    clearDragSession();
+    setActiveId(null);
+    setActiveRole(null);
+    setPanelOverCellId(null);
+  }, [clearDragSession]);
 
   // ============================================================
   // pointer tracking (internal drags + better hover for native)
@@ -643,8 +749,6 @@ export function useDnDControlCoordinator({
 
         hoveredPanelIdRef.current = getHoveredPanelId();
         hoveredContainerIdRef.current = getHoveredContainerId();
-
-        // ✅ central hotTarget update (single source of truth)
         refreshHotTarget();
 
         if (activeRef.current?.role === "panel") {
@@ -661,32 +765,24 @@ export function useDnDControlCoordinator({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("touchmove", onMove);
     };
-  }, [
-    getCellFromPointer,
-    getHoveredPanelId,
-    getHoveredContainerId,
-    refreshHotTarget,
-  ]);
+  }, [getCellFromPointer, getHoveredPanelId, getHoveredContainerId, refreshHotTarget]);
 
   // ============================================================
   // STACK HELPERS (draft-aware)
   // ============================================================
   const getStacksByCell = useCallback(() => {
-    const panels = getWorkingPanels();
-    const map = new Map(); // cellId -> panel[]
-    for (const p of panels) {
-      const key = cellKeyFromPanel(p);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(p);
-    }
-    for (const [k, list] of map.entries()) {
-      const visible = [];
-      const hidden = [];
-      for (const p of list) (panelDisplay(p) === "none" ? hidden : visible).push(p);
-      map.set(k, [...visible, ...hidden]);
-    }
-    return map;
-  }, [getWorkingPanels]);
+  const panels = getWorkingPanels();
+  const map = new Map(); // cellId -> panel[]
+
+  for (const p of panels) {
+    const key = cellKeyFromPanel(p);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  }
+
+  // ✅ IMPORTANT: keep original order (do NOT reorder by display)
+  return map;
+}, [getWorkingPanels]);
 
   const getStackForPanel = useCallback(
     (panel) => {
@@ -698,8 +794,6 @@ export function useDnDControlCoordinator({
     [getStacksByCell]
   );
 
-  // ✅ select a specific panel to be the visible one in its cell
-  // Signature matches Panel.jsx usage: (row, col, nextPanelId)
   const setActivePanelInCell = useCallback(
     (row, col, nextPanelId) => {
       const panels = getWorkingPanels();
@@ -752,10 +846,10 @@ export function useDnDControlCoordinator({
   const commitExternalCreate = useCallback(
     ({ containerId, label }) => {
       if (!containerId) return;
+
       const id = crypto.randomUUID();
       const instance = { id, label: label || "Untitled" };
 
-      // ✅ atomic create + attach
       LayoutHelpers.createInstanceInContainer({
         dispatch,
         socket,
@@ -773,18 +867,21 @@ export function useDnDControlCoordinator({
     const el = gridRef?.current;
     if (!el) return;
 
+    const isInsideGrid = (x, y) => {
+      const rect = el.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+
     const onDragOverNative = (e) => {
       e.preventDefault?.();
 
       const types = Array.from(e.dataTransfer?.types || []);
       const hasOurMime = types.includes(NATIVE_DND_MIME);
       const hasFiles = (e.dataTransfer?.files?.length || 0) > 0;
-      const hasText =
-        types.includes("text/plain") || types.includes("text/uri-list");
+      const hasText = types.includes("text/plain") || types.includes("text/uri-list");
 
       nativeActiveRef.current = hasOurMime || hasFiles || hasText;
 
-      // ✅ synthesize a lightweight active for hover/overlays during native drags
       if (!activeRef.current) {
         activeRef.current = { id: "__native__", role: "external", data: {} };
         setActiveRole("external");
@@ -793,8 +890,6 @@ export function useDnDControlCoordinator({
       pointerRef.current = { x: e.clientX, y: e.clientY };
       hoveredPanelIdRef.current = getHoveredPanelId();
       hoveredContainerIdRef.current = getHoveredContainerId();
-
-      // ✅ central hotTarget update (single source of truth)
       refreshHotTarget();
 
       const cell = getCellFromPointer();
@@ -901,16 +996,12 @@ export function useDnDControlCoordinator({
               e.dataTransfer?.getData?.("text/uri-list") ||
               "";
             const label = String(text || "").trim().slice(0, 80);
-            if (label) {
-              commitExternalCreate({ containerId: toContainerId, label });
-            }
+            if (label) commitExternalCreate({ containerId: toContainerId, label });
           }
         }
       }
 
       nativeActiveRef.current = false;
-
-      // ✅ clear synthesized native active
       activeRef.current = null;
 
       clearDragSession();
@@ -919,14 +1010,15 @@ export function useDnDControlCoordinator({
       setPanelOverCellId(null);
     };
 
-    const onDragLeaveNative = (e) => {
-      if (!el.contains(e.relatedTarget)) {
+    // ✅ FIX: dragleave is unreliable. Instead: during dragover, if pointer leaves grid rect, cancel.
+    const onDragOverWindow = (e) => {
+      if (!nativeActiveRef.current) return;
+      const x = e.clientX;
+      const y = e.clientY;
+      if (!isInsideGrid(x, y)) {
         nativeActiveRef.current = false;
-
-        // ✅ clear synthesized native active
         activeRef.current = null;
         setActiveRole(null);
-
         setPanelOverCellId(null);
         scheduleSoftTick?.();
       }
@@ -934,12 +1026,12 @@ export function useDnDControlCoordinator({
 
     el.addEventListener("dragover", onDragOverNative);
     el.addEventListener("drop", onDropNative);
-    el.addEventListener("dragleave", onDragLeaveNative);
+    window.addEventListener("dragover", onDragOverWindow);
 
     return () => {
       el.removeEventListener("dragover", onDragOverNative);
       el.removeEventListener("drop", onDropNative);
-      el.removeEventListener("dragleave", onDragLeaveNative);
+      window.removeEventListener("dragover", onDragOverWindow);
     };
   }, [
     gridRef,
@@ -965,11 +1057,7 @@ export function useDnDControlCoordinator({
     onDragStart,
     onDragOver,
     onDragEnd,
-    onDragCancel: () => {
-      clearDragSession();
-      setActiveId(null);
-      setActiveRole(null);
-    },
+    onDragCancel,
 
     activeId,
     activeRole,
