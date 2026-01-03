@@ -14,7 +14,7 @@ function SortableInstanceInner({ instance, containerId, panelId, dispatch, socke
     isDragging,
   } = useSortable({
     id: instance.id,
-    data: { role: "instance", containerId, label: instance.label, panelId },
+    data: { role: "instance", containerId, label: instance.label, panelId, instanceId: instance.id},
   });
 
   const style = {

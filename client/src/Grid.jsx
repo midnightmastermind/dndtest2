@@ -345,7 +345,7 @@ function GridInner({ components }) {
     onDragOver,
     onDragEnd,
     onDragCancel,
-
+    onDragMove,
     activeId,
     activeRole,
     panelDragging,
@@ -610,6 +610,7 @@ function GridInner({ components }) {
         onDragStart={onDragStart}
         onDragOver={onDragOver}
         onDragEnd={onDragEnd}
+        onDragMove={onDragMove}
         onDragCancel={onDragCancel}
       >
         <div
