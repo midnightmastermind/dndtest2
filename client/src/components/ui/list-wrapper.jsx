@@ -238,7 +238,6 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
 
   return (
     <div
-      ref={ref}
       className={cn(listWrapperVariants({ variant, padding }), className)}
       {...props}
     >
@@ -248,6 +247,7 @@ export const ListWrapper = React.forwardRef(function ListWrapper(
         className="h-full w-full"
       >
         <ScrollArea.Viewport
+          ref={ref}
           className={cn(viewportVariants({ insetX }), viewportClassName, " pl-[20px] pr-[25px]")}
           style={{ overflowX, overflowY }}
         >

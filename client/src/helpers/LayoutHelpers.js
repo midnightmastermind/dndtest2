@@ -208,21 +208,24 @@ export function moveContainerBetweenPanels({
 }) {
   if (!fromPanel || !toPanel || !containerId) return;
 
-  const fromNext = normalizeId({
-    ...fromPanel,
-    containers: removeId(fromPanel.containers || [], containerId),
-  });
+  const fromIds = (fromPanel.containers || []).filter((id) => id !== containerId);
+  const toIdsRaw = (toPanel.containers || []).filter((id) => id !== containerId);
 
-  const toNext = normalizeId({
-    ...toPanel,
-    containers:
-      toIndex == null
-        ? ensureId(toPanel.containers || [], containerId)
-        : insertAt(removeId(toPanel.containers || [], containerId), toIndex, containerId),
-  });
+  let toIds;
+  if (toIndex == null || toIndex < 0 || toIndex > toIdsRaw.length) {
+    toIds = [...toIdsRaw, containerId];
+  } else {
+    toIds = [...toIdsRaw];
+    toIds.splice(toIndex, 0, containerId);
+  }
 
-  CommitHelpers.updatePanel({ dispatch, socket, panel: fromNext, emit });
-  CommitHelpers.updatePanel({ dispatch, socket, panel: toNext, emit });
+  const nextFrom = { ...fromPanel, containers: fromIds };
+  const nextTo = { ...toPanel, containers: toIds };
+
+  // use YOUR existing commit path here:
+  // (some projects call CommitHelpers.updatePanel, some call updatePanel directly)
+  CommitHelpers.updatePanel?.({ dispatch, socket, panel: nextFrom, emit });
+  CommitHelpers.updatePanel?.({ dispatch, socket, panel: nextTo, emit });
 }
 
 export function moveInstanceBetweenContainers({

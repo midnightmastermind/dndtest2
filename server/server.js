@@ -81,6 +81,7 @@ io.use(async (socket, next) => {
   if (!token) {
     console.log("🟪 No token → guest allowed");
     socket.userId = null;
+    socket.data.userId = null;
     return next();
   }
 
@@ -100,6 +101,7 @@ io.use(async (socket, next) => {
 
   console.log("✅ Authenticated user:", user._id.toString());
   socket.userId = user._id.toString();
+  socket.data.userId = socket.userId;
   next();
 });
 
@@ -200,10 +202,9 @@ async function loadUserIntoCache(userId) {
     const obj = i.toObject();
     const id = obj.id || obj.instanceId || obj._id.toString();
     uc.instancesById[id] = {
-      id,
-      label: obj.label ?? "Untitled",
       ...obj,
       id, // normalize
+      label: obj.label ?? "Untitled",
     };
   });
 
@@ -219,13 +220,7 @@ async function loadUserIntoCache(userId) {
 
 function userCacheReady(userId) {
   const uc = cacheByUser[userId];
-  return !!(
-    uc &&
-    uc.gridsById &&
-    uc.panelsById &&
-    uc.containersById &&
-    uc.instancesById
-  );
+  return !!(uc && uc.gridsById && uc.panelsById && uc.containersById && uc.instancesById);
 }
 
 // ========================================================
@@ -292,11 +287,6 @@ io.on("connection", (socket) => {
 
   // ======================================================
   // FULL STATE REQUEST (merged)
-  // - if gridId missing => create a new grid for this user
-  // - containers/instances/panels are by userId only (gridId ignored)
-  //
-  // ✅ MULTI-WINDOW: active grid is PER SOCKET (socket.data.activeGridId)
-  // ✅ OPTIONAL: join per-grid room for future grid-scoped events
   // ======================================================
   socket.on("request_full_state", async (payload = {}) => {
     let { gridId } = payload || {};
@@ -310,7 +300,6 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      // helper to keep full_state payload consistent
       const emitFullState = async (gid) => {
         const grids = await getAllGridsForUser(userId);
         const gridObj = uc.gridsById[gid];
@@ -340,7 +329,7 @@ io.on("connection", (socket) => {
         });
 
         gridId = newGrid._id.toString();
-        uc.gridsById[gridId] = newGrid.toObject(); // store plain
+        uc.gridsById[gridId] = newGrid.toObject();
         console.log("✅ New grid created:", gridId);
 
         // ✅ per-socket active grid
@@ -363,7 +352,6 @@ io.on("connection", (socket) => {
           if (userGrids.length) {
             const fallbackId = userGrids[0];
 
-            // ✅ per-socket active grid
             const prev = socket.data.activeGridId;
             if (prev && prev !== fallbackId) socket.leave(gridRoom(userId, prev));
             socket.join(gridRoom(userId, fallbackId));
@@ -372,7 +360,6 @@ io.on("connection", (socket) => {
             return emitFullState(fallbackId);
           }
 
-          // no grids at all -> create one
           const newGrid = await Grid.create({
             rows: 2,
             cols: 3,
@@ -385,7 +372,6 @@ io.on("connection", (socket) => {
           const newId = newGrid._id.toString();
           uc.gridsById[newId] = newGrid.toObject();
 
-          // ✅ per-socket active grid
           const prev = socket.data.activeGridId;
           if (prev && prev !== newId) socket.leave(gridRoom(userId, prev));
           socket.join(gridRoom(userId, newId));
@@ -393,7 +379,7 @@ io.on("connection", (socket) => {
 
           return emitFullState(newId);
         }
-        uc.gridsById[gridId] = g; // lean object
+        uc.gridsById[gridId] = g;
       }
 
       // ✅ per-socket active grid + optional grid room
@@ -409,6 +395,57 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("request_full_state error:", err);
       socket.emit("server_error", "Failed to load state");
+    }
+  });
+  // ======================================================
+  // GRID CREATE (grid is gridId + userId)
+  // emits: grid_created  (no echo)
+  // ======================================================
+  socket.on("create_grid", async ({ grid } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!grid) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      // Accept either id or _id coming from client
+      const gridId = grid.id || grid._id;
+      if (!gridId) {
+        socket.emit("server_error", "create_grid missing grid id");
+        return;
+      }
+
+      const next = {
+        rows: grid.rows ?? 2,
+        cols: grid.cols ?? 3,
+        rowSizes: Array.isArray(grid.rowSizes) ? grid.rowSizes : [],
+        colSizes: Array.isArray(grid.colSizes) ? grid.colSizes : [],
+        name: grid.name ?? "",
+        userId,
+      };
+
+      // Upsert with _id = gridId to keep your existing Grid schema usage
+      const saved = await Grid.findOneAndUpdate(
+        { _id: gridId, userId },
+        { _id: gridId, ...next },
+        { upsert: true, new: true }
+      ).lean();
+
+      uc.gridsById[gridId] = saved;
+
+      socket.to(userRoom(userId)).emit("grid_created", {
+        grid: {
+          id: gridId,
+          _id: gridId,
+          ...saved,
+        },
+      });
+    } catch (err) {
+      console.error("create_grid error:", err);
+      socket.emit("server_error", "Failed to create grid");
     }
   });
 
@@ -447,7 +484,6 @@ io.on("connection", (socket) => {
         { upsert: true }
       );
 
-      // ✅ no-echo broadcast to this user's other windows
       socket.to(userRoom(userId)).emit("container_created", {
         container: {
           id,
@@ -464,77 +500,63 @@ io.on("connection", (socket) => {
   // ======================================================
   // INSTANCES IN CONTAINERS (userId ONLY - gridId ignored)
   // ======================================================
-  socket.on(
-    "create_instance_in_container",
-    async ({ containerId, instance }) => {
-      try {
-        const userId = socket.userId;
-        if (!userId) return;
+  socket.on("create_instance_in_container", async ({ containerId, instance }) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
 
-        if (!userCacheReady(userId)) await loadUserIntoCache(userId);
-        const uc = ensureUserCache(userId);
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
 
-        if (!containerId || !instance?.id) return;
+      if (!containerId || !instance?.id) return;
 
-        const instanceId = instance.id;
+      const instanceId = instance.id;
 
-        if (!uc.containersById[containerId]) {
-          uc.containersById[containerId] = {
-            id: containerId,
-            label: "Untitled",
-            items: [],
-          };
+      if (!uc.containersById[containerId]) {
+        uc.containersById[containerId] = { id: containerId, label: "Untitled", items: [] };
 
-          await Container.findOneAndUpdate(
-            { id: containerId, userId },
-            { id: containerId, userId, label: "Untitled", items: [] },
-            { upsert: true }
-          );
-        }
-
-        const c = uc.containersById[containerId];
-
-        const nextInst = {
-          ...(uc.instancesById[instanceId] || {}),
-          ...(instance || {}),
-          id: instanceId,
-          label:
-            instance.label ??
-            uc.instancesById[instanceId]?.label ??
-            "Untitled",
-          userId,
-        };
-
-        uc.instancesById[instanceId] = nextInst;
-
-        if (!c.items.includes(instanceId)) {
-          c.items = [...c.items, instanceId];
-        }
-
-        await Promise.all([
-          Instance.findOneAndUpdate({ id: instanceId, userId }, nextInst, {
-            upsert: true,
-          }),
-          Container.findOneAndUpdate(
-            { id: containerId, userId },
-            { items: c.items, label: c.label ?? "Untitled" },
-            { upsert: true }
-          ),
-        ]);
-
-        socket.to(userRoom(userId)).emit("instance_created_in_container", {
-          containerId,
-          instance: { id: nextInst.id, label: nextInst.label },
-        });
-      } catch (err) {
-        console.error("create_instance_in_container error:", err);
-        socket.emit("server_error", "Failed to create instance");
+        await Container.findOneAndUpdate(
+          { id: containerId, userId },
+          { id: containerId, userId, label: "Untitled", items: [] },
+          { upsert: true }
+        );
       }
+
+      const c = uc.containersById[containerId];
+
+      const nextInst = {
+        ...(uc.instancesById[instanceId] || {}),
+        ...(instance || {}),
+        id: instanceId,
+        label: instance.label ?? uc.instancesById[instanceId]?.label ?? "Untitled",
+        userId,
+      };
+
+      uc.instancesById[instanceId] = nextInst;
+
+      if (!c.items.includes(instanceId)) c.items = [...c.items, instanceId];
+
+      await Promise.all([
+        Instance.findOneAndUpdate({ id: instanceId, userId }, nextInst, { upsert: true }),
+        Container.findOneAndUpdate(
+          { id: containerId, userId },
+          { items: c.items, label: c.label ?? "Untitled" },
+          { upsert: true }
+        ),
+      ]);
+
+      socket.to(userRoom(userId)).emit("instance_created_in_container", {
+        containerId,
+        instance: { id: nextInst.id, label: nextInst.label },
+      });
+    } catch (err) {
+      console.error("create_instance_in_container error:", err);
+      socket.emit("server_error", "Failed to create instance");
     }
-  );
+  });
 
   // ======================================================
-  // CONTAINER ITEMS UPDATE (now UPSERTS container if missing)
+  // CONTAINER ITEMS UPDATE (UPSERTS container if missing)
   // ======================================================
   socket.on("update_container_items", async ({ containerId, items }) => {
     try {
@@ -547,11 +569,7 @@ io.on("connection", (socket) => {
       if (!containerId || !Array.isArray(items)) return;
 
       if (!uc.containersById[containerId]) {
-        uc.containersById[containerId] = {
-          id: containerId,
-          label: "Untitled",
-          items: [],
-        };
+        uc.containersById[containerId] = { id: containerId, label: "Untitled", items: [] };
       }
 
       const c = uc.containersById[containerId];
@@ -559,18 +577,11 @@ io.on("connection", (socket) => {
 
       await Container.findOneAndUpdate(
         { id: containerId, userId },
-        {
-          id: containerId,
-          userId,
-          label: c.label ?? "Untitled",
-          items: c.items,
-        },
+        { id: containerId, userId, label: c.label ?? "Untitled", items: c.items },
         { upsert: true }
       );
 
-      socket
-        .to(userRoom(userId))
-        .emit("container_items_updated", { containerId, items: c.items });
+      socket.to(userRoom(userId)).emit("container_items_updated", { containerId, items: c.items });
     } catch (err) {
       console.error("update_container_items error:", err);
       socket.emit("server_error", "Failed to update container");
@@ -578,7 +589,7 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // CONTAINER UPDATE (label/items/etc) — UPSERT
+  // CONTAINER UPDATE — UPSERT
   // emits: container_updated
   // ======================================================
   socket.on("update_container", async ({ container } = {}) => {
@@ -602,11 +613,7 @@ io.on("connection", (socket) => {
 
       uc.containersById[id] = next;
 
-      await Container.findOneAndUpdate(
-        { id, userId },
-        { ...next, userId },
-        { upsert: true }
-      );
+      await Container.findOneAndUpdate({ id, userId }, { ...next, userId }, { upsert: true });
 
       socket.to(userRoom(userId)).emit("container_updated", { container: next });
     } catch (err) {
@@ -616,7 +623,7 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // INSTANCE UPDATE (now UPSERTS instance if missing)
+  // INSTANCE UPDATE — UPSERT
   // ======================================================
   socket.on("update_instance", async ({ instance }) => {
     try {
@@ -665,36 +672,25 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      // 1) Remove instance from cache + DB
       if (uc.instancesById?.[instanceId]) delete uc.instancesById[instanceId];
       await Instance.findOneAndDelete({ id: instanceId, userId });
 
-      // 2) Cascade: remove instanceId from ALL containers.items
       const affectedContainers = [];
-
       for (const c of Object.values(uc.containersById || {})) {
         if (!Array.isArray(c.items)) continue;
         if (!c.items.includes(instanceId)) continue;
 
         const nextItems = c.items.filter((iid) => iid !== instanceId);
         c.items = nextItems;
-
         affectedContainers.push({ containerId: c.id, items: nextItems });
       }
 
-      await Container.updateMany(
-        { userId, items: instanceId },
-        { $pull: { items: instanceId } }
-      );
+      await Container.updateMany({ userId, items: instanceId }, { $pull: { items: instanceId } });
 
-      // notify other windows about container changes
       for (const { containerId, items } of affectedContainers) {
-        socket
-          .to(userRoom(userId))
-          .emit("container_items_updated", { containerId, items });
+        socket.to(userRoom(userId)).emit("container_items_updated", { containerId, items });
       }
 
-      // 3) Notify instance deleted
       socket.to(userRoom(userId)).emit("instance_deleted", { instanceId });
     } catch (err) {
       console.error("delete_instance error:", err);
@@ -728,9 +724,7 @@ io.on("connection", (socket) => {
 
       uc.panelsById[panelId] = next;
 
-      await Panel.findOneAndUpdate({ id: panelId, userId }, next, {
-        upsert: true,
-      });
+      await Panel.findOneAndUpdate({ id: panelId, userId }, next, { upsert: true });
 
       socket.to(userRoom(userId)).emit("panel_updated", next);
     } catch (err) {
@@ -763,11 +757,9 @@ io.on("connection", (socket) => {
 
       uc.panelsById[panelId] = next;
 
-      await Panel.findOneAndUpdate({ id: panelId, userId }, next, {
-        upsert: true,
-      });
+      await Panel.findOneAndUpdate({ id: panelId, userId }, next, { upsert: true });
 
-      socket.to(userRoom(userId)).emit("panel_updated", next);
+      socket.to(userRoom(userId)).emit("panel_created", next);
     } catch (err) {
       console.error("add_panel error:", err);
       socket.emit("server_error", "Failed to add panel");
@@ -798,8 +790,6 @@ io.on("connection", (socket) => {
 
   // ======================================================
   // CONTAINER DELETE — removes container + pulls from ALL panels.containers
-  // (does NOT delete instances)
-  // emits: container_deleted, panel_updated (for each affected panel)
   // ======================================================
   socket.on("delete_container", async ({ containerId } = {}) => {
     try {
@@ -810,36 +800,26 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      // 1) Remove container from cache + DB
       if (uc.containersById?.[containerId]) delete uc.containersById[containerId];
       await Container.findOneAndDelete({ id: containerId, userId });
 
-      // 2) Cascade: remove containerId from ALL panels.containers
       const affectedPanels = [];
 
       for (const p of Object.values(uc.panelsById || {})) {
         if (!Array.isArray(p.containers)) continue;
         if (!p.containers.includes(containerId)) continue;
 
-        const next = {
-          ...p,
-          containers: p.containers.filter((cid) => cid !== containerId),
-        };
-
+        const next = { ...p, containers: p.containers.filter((cid) => cid !== containerId) };
         uc.panelsById[next.id] = next;
         affectedPanels.push(next);
       }
 
-      await Panel.updateMany(
-        { userId, containers: containerId },
-        { $pull: { containers: containerId } }
-      );
+      await Panel.updateMany({ userId, containers: containerId }, { $pull: { containers: containerId } });
 
       for (const panel of affectedPanels) {
         socket.to(userRoom(userId)).emit("panel_updated", panel);
       }
 
-      // 3) Notify clients container is gone
       socket.to(userRoom(userId)).emit("container_deleted", { containerId });
     } catch (err) {
       console.error("delete_container error:", err);
@@ -848,7 +828,7 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // GRID UPDATE (grid is gridId + userId) — now UPSERTS
+  // GRID UPDATE (grid is gridId + userId) — UPSERT
   // ======================================================
   socket.on("update_grid", async (payload) => {
     try {
@@ -888,18 +868,11 @@ io.on("connection", (socket) => {
         }
       }
 
-      uc.gridsById[gridId] = {
-        ...uc.gridsById[gridId],
-        ...updatePatch,
-      };
+      uc.gridsById[gridId] = { ...uc.gridsById[gridId], ...updatePatch };
 
-      await Grid.findOneAndUpdate({ _id: gridId, userId }, updatePatch, {
-        upsert: true,
-      });
+      await Grid.findOneAndUpdate({ _id: gridId, userId }, updatePatch, { upsert: true });
 
-      socket
-        .to(userRoom(userId))
-        .emit("grid_updated", { gridId, grid: updatePatch });
+      socket.to(userRoom(userId)).emit("grid_updated", { gridId, grid: updatePatch });
     } catch (err) {
       console.error("update_grid error:", err);
       socket.emit("server_error", "Failed to update grid");
@@ -921,7 +894,6 @@ io.on("connection", (socket) => {
       await Grid.findOneAndDelete({ _id: gridId, userId });
       if (uc.gridsById?.[gridId]) delete uc.gridsById[gridId];
 
-      // If THIS socket was viewing the deleted grid, pick a safe fallback and send full_state
       if (socket.data.activeGridId === gridId) {
         const remaining = Object.keys(uc.gridsById);
 
@@ -942,7 +914,6 @@ io.on("connection", (socket) => {
           uc.gridsById[nextId] = newGrid.toObject();
         }
 
-        // switch this socket to nextId (grid room)
         socket.leave(gridRoom(userId, gridId));
         socket.join(gridRoom(userId, nextId));
         socket.data.activeGridId = nextId;

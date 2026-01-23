@@ -1,9 +1,9 @@
 // Panel.jsx — MERGED (centralized hover + data-panel-id + stack UI + emit-flag + shell droppable)
-// Notes:
-// - Uses coordinator-provided hotTarget (NO hit-testing here)
-// - Shell is BOTH draggable + droppable (panel:drop)
-// - data-panel-id is required for native/cross-window + hover fallback
-// - Stack UI calls coordinator hooks: onSelectStackPanel(row,col,id) and onCycleStack({panelId,dir})
+// Fixes merged in:
+// ✅ Supports native/external drags via props: isExternalDrag + dragRole (from GridInner panelProps)
+// ✅ Panel/container drop enable + highlight now treats external like instance/container (so UI highlights during native drag)
+// ✅ Fix bad ListWrapper ref wiring: don't pass same ref to BOTH `ref` and `viewportRef`
+// ✅ Keep panel shell droppable on OUTER shell only (panel:drop), container-drop on viewport (scroll area)
 
 import React, { useRef, useMemo, useState, useCallback, useEffect } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
@@ -131,6 +131,11 @@ function Panel({
 
   isContainerDrag,
   isInstanceDrag,
+
+  // ✅ NEW (from GridInner panelProps): treat native/external drags same as instance drag for highlighting
+  isExternalDrag = false,
+  dragRole = null,
+
   addContainerToPanel,
   addInstanceToContainer,
   instancesById,
@@ -144,6 +149,7 @@ function Panel({
   onSelectStackPanel, // (row, col, nextPanelId) => void
   onCycleStack, // ({ panelId, dir }) => void
   stackPanels, // stack list for this cell (includes hidden)
+  nativeEnabled = false,
 }) {
   // ----------------------------------------------------------
   // ✅ Layout: derive from panel.layout + debounced backend write
@@ -212,7 +218,7 @@ function Panel({
       window.clearTimeout(layoutSaveTimer.current);
       layoutSaveTimer.current = window.setTimeout(() => {
         CommitHelpers.updatePanel({
-          dispatch: null,
+          dispatch,
           socket,
           panel: nextPanel,
           emit: true,
@@ -247,20 +253,39 @@ function Panel({
   }, [setFullscreenPanelId]);
 
   const SortableContainer = components["SortableContainer"];
-  const isChildDrag = isContainerDrag || isInstanceDrag;
+
+  // ✅ "child drag" means: don't let panel header take draggable listeners
+  const isChildDrag = isContainerDrag || isInstanceDrag || isExternalDrag;
 
   // ✅ panel dropzone on shell (NOT scroll)
   const { setNodeRef: setPanelDropRef, isOver: isOverPanelDrop } = useDroppable({
     id: `panelDrop:${panel.id}`,
-    disabled: hidden,
+    disabled: hidden || !isContainerDrag, // keep shell drop for container moves only
     data: { role: "panel:drop", panelId: panel.id },
+  });
+
+  // ✅ container-list dropzone (this is what should highlight for instance/external drops)
+  const {
+    setNodeRef: setPanelContainersDropRef,
+    isOver: isOverPanelContainersDrop,
+  } = useDroppable({
+    id: `panelContainersDrop:${panel.id}`,
+    disabled: hidden || !(isContainerDrag || isInstanceDrag || isExternalDrag),
+    data: { role: "panel:container-drop", panelId: panel.id },
   });
 
   const collapsed = false;
 
   // ✅ centralized hover check (no hit-testing here)
   const isHotPanel = (hotTarget?.panelId ?? null) === panel.id;
-  const highlightPanel = isContainerDrag && (isOverPanelDrop || isHotPanel) && !collapsed;
+
+  // ✅ highlight the panel border when anything relevant is over it
+  const highlightPanel =
+    !collapsed &&
+    !hidden &&
+    (isOverPanelDrop ||
+      isOverPanelContainersDrop ||
+      (isHotPanel && (isContainerDrag || isInstanceDrag || isExternalDrag)));
 
   const data = useMemo(
     () => ({
@@ -415,8 +440,8 @@ function Panel({
   const outlineStyle = isResizing
     ? "2px solid rgba(50,150,255,0.6)"
     : highlightPanel
-    ? "2px solid rgba(50,150,255,0.9)"
-    : "none";
+      ? "2px solid rgba(50,150,255,0.9)"
+      : "none";
 
   const gapPresetFinal = gapPxToPreset(layout.gapPx);
 
@@ -442,12 +467,15 @@ function Panel({
         overflow: "hidden",
         position: "relative",
         boxSizing: "border-box",
+        alignSelf: "stretch",
+        justifySelf: "stretch",
         margin: 5,
         transition: isResizing ? "all 80ms linear" : "none",
         opacity: collapsed ? 0 : 1,
         visibility: collapsed ? "hidden" : "visible",
-        zIndex: 50,
+        zIndex: hidden || collapsed ? -1 : 50,
         display,
+        // ✅ KEY FIX: Prevent hidden/background panels from capturing pointer events
         pointerEvents: hidden || collapsed ? "none" : "auto",
       };
 
@@ -507,7 +535,12 @@ function Panel({
           {hasStack ? (
             <div
               className="panel-selector"
-              style={{ display: "flex", justifyContent: "start", alignItems: "center", maxWidth: 260 }}
+              style={{
+                display: "flex",
+                justifyContent: "start",
+                alignItems: "center",
+                maxWidth: 260,
+              }}
             >
               <Button
                 variant="ghost"
@@ -543,7 +576,10 @@ function Panel({
                   }}
                 />
               ) : (
-                <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
+                <div
+                  className="font-mono text-[10px] sm:text-xs"
+                  style={{ fontWeight: 500, paddingLeft: 3 }}
+                >
                   {panel?.layout?.name}
                 </div>
               )}
@@ -563,7 +599,10 @@ function Panel({
               </Button>
             </div>
           ) : (
-            <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
+            <div
+              className="font-mono text-[10px] sm:text-xs"
+              style={{ fontWeight: 500, paddingLeft: 3 }}
+            >
               {panel?.layout?.name}
             </div>
           )}
@@ -579,7 +618,14 @@ function Panel({
               />
             </ButtonPopover>
 
-            <Button size="sm" onClick={() => addContainerToPanel(panel.id)}>
+            <Button
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                addContainerToPanel(panel.id);
+              }}
+            >
               <PlusSquare className="h-4 w-4 pr-[2px]" />
               <span className="button-span">Container</span>
             </Button>
@@ -593,7 +639,11 @@ function Panel({
                 isFullscreen ? closeFullscreen() : openFullscreen();
               }}
             >
-              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+              {isFullscreen ? (
+                <Minimize className="h-4 w-4" />
+              ) : (
+                <Maximize className="h-4 w-4" />
+              )}
             </Button>
           </div>
         </div>
@@ -611,8 +661,14 @@ function Panel({
         >
           <div className="listbuffer" style={{ height: 20, zIndex: 1 }} />
 
-          <SortableContext items={panelContainerIds} strategy={rectSortingStrategy} disabled={isInstanceDrag}>
+          <SortableContext
+            items={panelContainerIds}
+            strategy={rectSortingStrategy}
+            disabled={isInstanceDrag || isExternalDrag}
+          >
             <ListWrapper
+              // ✅ IMPORTANT: only wire droppable to viewportRef (scroll surface)
+              ref={setPanelContainersDropRef}
               className="h-full w-full"
               display={layout.display}
               flow={layout.flow}
@@ -651,12 +707,16 @@ function Panel({
                   addInstanceToContainer={addInstanceToContainer}
                   isDraggingContainer={isContainerDrag}
                   isInstanceDrag={isInstanceDrag}
+                  // ✅ optional: let container know about external drag if it needs to render hover
+                  isExternalDrag={isExternalDrag}
+                  dragRole={dragRole}
                   dispatch={dispatch}
                   socket={socket}
+                  nativeEnabled={nativeEnabled}
                 />
               ))}
 
-              {panelContainers.length === 0 && !isContainerDrag && (
+              {panelContainers.length === 0 && !(isContainerDrag || isExternalDrag) && (
                 <div className="mt-3 opacity-70 text-[13px]">Create a container to start.</div>
               )}
             </ListWrapper>
@@ -688,6 +748,8 @@ export default React.memo(Panel, (prev, next) => {
 
   if (prev.isContainerDrag !== next.isContainerDrag) return false;
   if (prev.isInstanceDrag !== next.isInstanceDrag) return false;
+  if (prev.isExternalDrag !== next.isExternalDrag) return false;
+  if (prev.dragRole !== next.dragRole) return false;
 
   const prevHotPanel = prev.hotTarget?.panelId ?? null;
   const nextHotPanel = next.hotTarget?.panelId ?? null;
@@ -715,6 +777,8 @@ export default React.memo(Panel, (prev, next) => {
   if (prev.dispatch !== next.dispatch) return false;
   if (prev.socket !== next.socket) return false;
   if (prev.containersById !== next.containersById) return false;
+
+  if (prev.nativeEnabled !== next.nativeEnabled) return false;
 
   return true;
 });

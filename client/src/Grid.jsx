@@ -372,6 +372,10 @@ function GridInner({ components }) {
     isInstanceDrag,
   } = coord;
 
+  // ✅ Treat native/external drags as highlightable (same pathway as instance)
+  const isExternalDrag = activeRole === "external";
+  const dragRole = activeRole;
+
   const containersRender = getWorkingContainers?.() ?? state?.containers ?? [];
   const panelsRender = getWorkingPanels?.() ?? visiblePanels;
   const allPanelsRender = getWorkingAllPanels?.() ?? (state?.panels ?? visiblePanels);
@@ -556,6 +560,10 @@ function GridInner({ components }) {
       isContainerDrag,
       isInstanceDrag,
 
+      // ✅ NEW: native/external drag uses the same highlight path
+      isExternalDrag,
+      dragRole,
+
       // ✅ stack actions from coordinator
       onSelectStackPanel: setActivePanelInCell,
       onCycleStack: cyclePanelStack,
@@ -567,6 +575,7 @@ function GridInner({ components }) {
       dispatch,
       socket,
       gridRef,
+      nativeEnabled: coord.nativeEnabled,
     }),
     [
       addContainerToPanel,
@@ -577,6 +586,8 @@ function GridInner({ components }) {
       hotTarget,
       isContainerDrag,
       isInstanceDrag,
+      isExternalDrag,
+      dragRole,
       setActivePanelInCell,
       cyclePanelStack,
       getHoveredPanelId,
@@ -584,6 +595,9 @@ function GridInner({ components }) {
       dispatch,
       socket,
       gridRef,
+      coord.nativeEnabled,
+      // ✅ ensure props refresh during drag ticks even if refs are stable
+      dragTick,
     ]
   );
 
@@ -616,7 +630,7 @@ function GridInner({ components }) {
         <div
           className={[
             "bg-background2 rounded-xl border border-border shadow-inner ring-1 ring-black/30",
-            fullscreenPanelId ? "grid-muted" : "",
+            fullscreenPanelId !== null ? "grid-muted" : "",
           ].join(" ")}
           style={{
             position: "absolute",

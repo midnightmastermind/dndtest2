@@ -1,31 +1,23 @@
 // helpers/useDnDControlCoordinator.js
 //
-// ✅ Unified Drag-and-Drop Control Coordinator (condensed + uniform)
-// Adds:
-// - DOM hit-testing: getHoveredPanelId + getHoveredContainerId
-// - Centralized hover surface: hotTarget (single source of truth)
-// - Stack helpers re-exposed: getStacksByCell, getStackForPanel, cyclePanelStack, setActivePanelInCell
-// - Commit policy: preview is draft-only, hard commits explicit emit=true
-// - Native/cross-window bridge: inbound dragover/drop -> commit router
+// ✅ COMPLETE FIXED VERSION with:
+// - Z-index aware hit testing (elementsFromPoint)
+// - Panel-level gating for instances
+// - Throttled hit testing during drag
+// - ✅ NO auto native handoff (removed)
+// - Preview revert when "over" becomes null (no stuck preview)
+// - De-dupe preview insertion (no ballooning duplicates)
+// - Stack helpers re-exposed (draft-aware)
+// - Native inbound bridge (dragover/drop on gridRef)
+//
+// ✅ NEW MERGE (fix highlight "1 behind"):
+// - hotTarget is now STATE + REF (RAF-flushed), so UI re-renders immediately
+// - onDragMove refreshes hotTarget continuously (no "over" dependence)
+// - setHotTarget schedules state updates via requestAnimationFrame (deduped)
 //
 // IMPORTANT:
 // - Panel roots render:     data-panel-id={panel.id}
 // - Container roots render: data-container-id={container.id}
-//
-// ✅ FIX MERGE:
-// - If dnd-kit "over" becomes null (pointer in gaps / left droppables), preview now REVERTS
-//   back to the start snapshot so you don't get "stuck preview" in the last container/panel.
-//
-// ✅ INSTANCE DRAG FIXES (this merge):
-// - Preview sort now DE-DUPES the instance/container in the destination before inserting.
-// - Collision detection prefers pointerWithin for instance/container drags, but falls back to
-//   closestCenter only when needed (still filtered to avoid “panel:drop” masking).
-//
-// ✅ MOBILE CRASH FIXES (this merge):
-// - Remove global window touchmove/mousemove tracking for dnd-kit (prevents rect-measure thrash).
-// - Use dnd-kit onDragMove to track pointer/hover during internal drags.
-// - RAF-throttle scheduleSoftTick (prevents runaway useRects measurement loops).
-// - Keep window dragover tracking ONLY for native/cross-window bridge.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -39,6 +31,7 @@ import {
 
 import * as CommitHelpers from "./CommitHelpers";
 import * as LayoutHelpers from "./LayoutHelpers";
+import { NATIVE_DND_MIME } from "./nativeDnd"; // ✅ single source of truth
 
 // ============================================================
 // 🔧 PERFORMANCE FLAGS
@@ -50,7 +43,6 @@ const ENABLE_CONTAINER_PREVIEW_SORT = true;
 // 🧩 Native / cross-window bridge flags
 // ============================================================
 const ENABLE_NATIVE_BRIDGE = true;
-const NATIVE_DND_MIME = "application/x-daytracker-dnd"; // custom transfer type
 
 // ============================================================
 // tiny utils
@@ -62,7 +54,7 @@ function clamp(n, a, b) {
 function deepClonePanels(panels = []) {
   return panels.map((p) => ({
     ...p,
-    layout: p.layout ? { ...p.layout } : p.layout,
+    layout: p.layout ? { ...p.layout, style: { ...(p.layout.style || {}) } } : p.layout,
     containers: [...(p.containers || [])],
   }));
 }
@@ -96,6 +88,24 @@ function safeJsonParse(str) {
   }
 }
 
+function makeUUID() {
+  try {
+    return crypto?.randomUUID?.();
+  } catch {}
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// ============================================================
+// ✅ Z-index aware hit testing
+// ============================================================
+function getTopmostElementWithAttrEl(x, y, attribute) {
+  const elements = document.elementsFromPoint(x, y);
+  for (const el of elements) {
+    const target = el.closest?.(`[${attribute}]`);
+    if (target) return target;
+  }
+  return null;
+}
 // ============================================================
 // PREVIEW MUTATION HELPERS (DRAFT ONLY)
 // ============================================================
@@ -180,15 +190,24 @@ export function useDnDControlCoordinator({
   const overRef = useRef(null);
   const pointerRef = useRef({ x: 0, y: 0 });
 
+  // ✅ Track drag start point (activatorEvent doesn't update during drag)
+  const dragStartPointRef = useRef(null);
+
   // DOM hit-testing refs
   const hoveredPanelIdRef = useRef(null);
   const hoveredContainerIdRef = useRef(null);
 
   // ✅ Centralized hover output (single source of truth)
+  // NEW: hotTarget is REF + STATE (RAF flushed) so UI renders immediately
   const hotTargetRef = useRef(null);
+  const [hotTargetState, setHotTargetState] = useState(null);
+  const hotRafRef = useRef(0);
 
-  // Native-mode session flag
+  // Native-mode session flag (inbound / external only)
   const nativeActiveRef = useRef(false);
+
+  // ✅ Throttle ref for hit testing
+  const hitTestThrottleRef = useRef(0);
 
   const sessionRef = useRef({
     dragging: false,
@@ -251,70 +270,79 @@ export function useDnDControlCoordinator({
   // ============================================================
   // geometry
   // ============================================================
+  const getCellFromPoint = useCallback(
+    (x, y) => {
+      const el = gridRef?.current;
+      if (!el) return null;
+
+      const rect = el.getBoundingClientRect();
+
+      const relX = (x - rect.left) / rect.width;
+      const relY = (y - rect.top) / rect.height;
+
+      const totalCols = (colSizes || []).reduce((a, b) => a + b, 0) || 1;
+      const totalRows = (rowSizes || []).reduce((a, b) => a + b, 0) || 1;
+
+      let acc = 0;
+      let col = 0;
+      for (let i = 0; i < (colSizes || []).length; i++) {
+        acc += colSizes[i];
+        if (relX <= acc / totalCols) {
+          col = i;
+          break;
+        }
+      }
+
+      acc = 0;
+      let row = 0;
+      for (let i = 0; i < (rowSizes || []).length; i++) {
+        acc += rowSizes[i];
+        if (relY <= acc / totalRows) {
+          row = i;
+          break;
+        }
+      }
+
+      const rr = clamp(row, 0, rows - 1);
+      const cc = clamp(col, 0, cols - 1);
+
+      return { row: rr, col: cc, cellId: `cell-${rr}-${cc}` };
+    },
+    [gridRef, rows, cols, rowSizes, colSizes]
+  );
+
   const getCellFromPointer = useCallback(() => {
-    const el = gridRef?.current;
-    if (!el) return null;
-
-    const { x, y } = pointerRef.current;
-    const rect = el.getBoundingClientRect();
-
-    const relX = (x - rect.left) / rect.width;
-    const relY = (y - rect.top) / rect.height;
-
-    const totalCols = (colSizes || []).reduce((a, b) => a + b, 0) || 1;
-    const totalRows = (rowSizes || []).reduce((a, b) => a + b, 0) || 1;
-
-    // ✅ FIX: correct binning so we don't "stick" in col 0/row 0
-    let acc = 0;
-    let col = 0;
-    for (let i = 0; i < (colSizes || []).length; i++) {
-      acc += colSizes[i];
-      if (relX <= acc / totalCols) {
-        col = i;
-        break;
-      }
-    }
-
-    acc = 0;
-    let row = 0;
-    for (let i = 0; i < (rowSizes || []).length; i++) {
-      acc += rowSizes[i];
-      if (relY <= acc / totalRows) {
-        row = i;
-        break;
-      }
-    }
-
-    const rr = clamp(row, 0, rows - 1);
-    const cc = clamp(col, 0, cols - 1);
-
-    return { row: rr, col: cc, cellId: `cell-${rr}-${cc}` };
-  }, [gridRef, rows, cols, rowSizes, colSizes]);
-
-  // ============================================================
-  // DOM hit-testing (hovered panel/container under pointer)
-  // ============================================================
-  const getHoveredPanelId = useCallback(() => {
     const { x, y } = pointerRef.current;
     if (typeof x !== "number" || typeof y !== "number") return null;
+    return getCellFromPoint(x, y);
+  }, [getCellFromPoint]);
 
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
+  // ============================================================
+  // ✅ Z-index aware DOM hit-testing
+  // ============================================================
+const getHoveredContainerId = useCallback(() => {
+  const { x, y } = pointerRef.current;
+  if (typeof x !== "number" || typeof y !== "number") return null;
 
-    const panelEl = el.closest?.("[data-panel-id]");
-    return panelEl?.getAttribute?.("data-panel-id") ?? null;
-  }, []);
+  const el = getTopmostElementWithAttrEl(x, y, "data-container-id");
+  return el ? el.getAttribute("data-container-id") : null;
+}, []);
 
-  const getHoveredContainerId = useCallback(() => {
-    const { x, y } = pointerRef.current;
-    if (typeof x !== "number" || typeof y !== "number") return null;
+const getHoveredPanelId = useCallback(() => {
+  const { x, y } = pointerRef.current;
+  if (typeof x !== "number" || typeof y !== "number") return null;
 
-    const el = document.elementFromPoint(x, y);
-    if (!el) return null;
+  // ✅ prefer panel derived from container ancestry (prevents panel “flap”)
+  const containerEl = getTopmostElementWithAttrEl(x, y, "data-container-id");
+  if (containerEl) {
+    const panelEl = containerEl.closest?.("[data-panel-id]");
+    if (panelEl) return panelEl.getAttribute("data-panel-id");
+  }
 
-    const containerEl = el.closest?.("[data-container-id]");
-    return containerEl?.getAttribute?.("data-container-id") ?? null;
-  }, []);
+  // fallback: direct panel hit
+  const panelEl = getTopmostElementWithAttrEl(x, y, "data-panel-id");
+  return panelEl ? panelEl.getAttribute("data-panel-id") : null;
+}, []);
 
   // ============================================================
   // Centralized hover surface (hotTarget)
@@ -335,9 +363,29 @@ export function useDnDControlCoordinator({
       prev.containerId === next.containerId &&
       prev.overInstanceId === next.overInstanceId;
 
-    if (!same) hotTargetRef.current = next;
+    if (same) return;
+
+    // ✅ always keep ref in sync
+    hotTargetRef.current = next;
+
+    // ✅ RAF flush to state (render) — prevents “1 behind”
+    if (hotRafRef.current) cancelAnimationFrame(hotRafRef.current);
+    hotRafRef.current = requestAnimationFrame(() => {
+      hotRafRef.current = 0;
+      setHotTargetState((curr) => {
+        const same2 =
+          curr &&
+          curr.role === next.role &&
+          curr.panelId === next.panelId &&
+          curr.containerId === next.containerId &&
+          curr.overInstanceId === next.overInstanceId;
+        return same2 ? curr : next;
+      });
+    });
   }, []);
 
+
+  // ✅ FIX: hotTarget.role must represent ACTIVE role (uniform), never droppable role
   const refreshHotTarget = useCallback(() => {
     const a = activeRef.current;
     const o = overRef.current;
@@ -345,7 +393,7 @@ export function useDnDControlCoordinator({
     if (o) {
       if (a?.role === "instance") {
         setHotTarget({
-          role: o.role || "instance",
+          role: "instance",
           panelId: o.panelId ?? hoveredPanelIdRef.current,
           containerId: o.containerId ?? hoveredContainerIdRef.current,
           overInstanceId: o.overInstanceId ?? null,
@@ -355,7 +403,7 @@ export function useDnDControlCoordinator({
 
       if (a?.role === "container") {
         setHotTarget({
-          role: o.role || "container",
+          role: "container",
           panelId: o.panelId ?? hoveredPanelIdRef.current,
           containerId: null,
           overInstanceId: null,
@@ -374,7 +422,7 @@ export function useDnDControlCoordinator({
       }
 
       setHotTarget({
-        role: o.role || "",
+        role: a?.role || "",
         panelId: o.panelId ?? hoveredPanelIdRef.current,
         containerId: o.containerId ?? hoveredContainerIdRef.current,
         overInstanceId: o.overInstanceId ?? null,
@@ -382,9 +430,19 @@ export function useDnDControlCoordinator({
       return;
     }
 
-    if (a?.role === "instance" || a?.role === "external") {
+    if (a?.role === "instance") {
       setHotTarget({
-        role: a?.role || "external",
+        role: "instance",
+        panelId: hoveredPanelIdRef.current,
+        containerId: hoveredContainerIdRef.current,
+        overInstanceId: null,
+      });
+      return;
+    }
+
+    if (a?.role === "external") {
+      setHotTarget({
+        role: "external",
         panelId: hoveredPanelIdRef.current,
         containerId: hoveredContainerIdRef.current,
         overInstanceId: null,
@@ -443,7 +501,6 @@ export function useDnDControlCoordinator({
     s.draftContainers = deepCloneContainers(baseContainers);
   }, [basePanels, baseContainers]);
 
-  // ✅ FIX: helper to revert preview back to the "start" snapshot
   const resetDraftToStart = useCallback(() => {
     const s = sessionRef.current;
     if (!s.dragging) return;
@@ -462,9 +519,14 @@ export function useDnDControlCoordinator({
     activeRef.current = null;
     overRef.current = null;
 
+    dragStartPointRef.current = null;
+
     hoveredPanelIdRef.current = null;
     hoveredContainerIdRef.current = null;
     hotTargetRef.current = null;
+    setHotTargetState(null);
+    if (hotRafRef.current) cancelAnimationFrame(hotRafRef.current);
+    hotRafRef.current = 0;
 
     nativeActiveRef.current = false;
 
@@ -475,36 +537,160 @@ export function useDnDControlCoordinator({
   // ============================================================
   // sensors
   // ============================================================
+  // ✅ bump distance so "edge intent" native gating can win BEFORE dnd-kit activates
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 16 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 80, tolerance: 6 } })
   );
+useEffect(() => {
+  const onPointerMove = (e) => {
+    // ✅ no new refs: use existing sessionRef + nativeActiveRef
+    const dragging = sessionRef.current?.dragging;
+    const native = nativeActiveRef.current;
 
+    if (!dragging && !native) return;
+
+    const x = e.clientX ?? e.touches?.[0]?.clientX;
+    const y = e.clientY ?? e.touches?.[0]?.clientY;
+    if (typeof x !== "number" || typeof y !== "number") return;
+
+    pointerRef.current = { x, y };
+
+    // throttle
+    const now = performance.now();
+    if (now - hitTestThrottleRef.current < 16) return;
+    hitTestThrottleRef.current = now;
+
+    const nextPanel = getHoveredPanelId();
+    const nextCont = getHoveredContainerId();
+
+    if (
+      nextPanel !== hoveredPanelIdRef.current ||
+      nextCont !== hoveredContainerIdRef.current
+    ) {
+      hoveredPanelIdRef.current = nextPanel;
+      hoveredContainerIdRef.current = nextCont;
+    }
+
+    // ✅ always keep hotTarget fresh (this is what your UI uses)
+    refreshHotTarget();
+
+    // panel drag cell highlight (optional)
+    if (activeRef.current?.role === "panel") {
+      const cell = getCellFromPointer();
+      setPanelOverCellId(cell?.cellId ?? null);
+    }
+
+    requestSoftTick();
+  };
+
+  window.addEventListener("pointermove", onPointerMove, { passive: true });
+  window.addEventListener("touchmove", onPointerMove, { passive: true });
+
+  return () => {
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("touchmove", onPointerMove);
+  };
+}, [
+  getHoveredPanelId,
+  getHoveredContainerId,
+  refreshHotTarget,
+  getCellFromPointer,
+  requestSoftTick,
+]);
   // ============================================================
-  // collision detection
+  // ✅ collision detection with panel-level gating
   // ============================================================
   const collisionDetection = useMemo(
     () => (args) => {
-      if (activeRef.current?.role === "panel") {
-        return panelOverCellId ? [{ id: panelOverCellId }] : [];
+      const role = activeRef.current?.role;
+
+      if (role === "panel") {
+        const pc = args.pointerCoordinates;
+        const cell = pc ? getCellFromPoint(pc.x, pc.y) : null;
+        const id = cell?.cellId ?? panelOverCellId;
+        return id ? [{ id }] : [];
       }
+
+      const getMeta = (c) => c?.data?.droppableContainer?.data?.current ?? null;
+      const roleOf = (c) => pickRole(getMeta(c));
+
+      const hoveredPanelId = hoveredPanelIdRef.current;
+      const hoveredContainerId = hoveredContainerIdRef.current;
 
       const raw = pointerWithin(args);
-      const filtered = raw.filter(
-        (c) => pickRole(c?.data?.droppableContainer?.data?.current) !== "panel:drop"
-      );
+      const hits = raw.filter((c) => roleOf(c) !== "panel:drop");
 
-      // ✅ For instance/container drags:
-      // - prefer pointerWithin (filtered)
-      // - but if you're in gaps, fall back to closestCenter (still filtered to avoid panel:drop)
-      const role = activeRef.current?.role;
-      if (role === "instance" || role === "container") {
-        return filtered.length ? filtered : closestCenter(args);
+      // ✅ INSTANCE DRAGS: Double-gate on panel AND container
+      if (role === "instance" && hoveredContainerId && hoveredPanelId) {
+        const gated = hits.filter((c) => {
+          const m = getMeta(c);
+
+          const matchesContainer =
+            m?.containerId === hoveredContainerId || String(c.id) === String(hoveredContainerId);
+
+          const matchesPanel = m?.panelId === hoveredPanelId;
+
+          return matchesContainer && matchesPanel;
+        });
+
+        if (gated.length) return gated;
+
+        const cc = closestCenter(args)
+          .filter((c) => roleOf(c) !== "panel:drop")
+          .filter((c) => {
+            const m = getMeta(c);
+            const matchesContainer =
+              m?.containerId === hoveredContainerId || String(c.id) === String(hoveredContainerId);
+            const matchesPanel = m?.panelId === hoveredPanelId;
+            return matchesContainer && matchesPanel;
+          });
+
+        return cc;
       }
 
-      return filtered.length ? filtered : closestCenter(args);
+      // ✅ INSTANCE DRAGS: Panel-only gating
+      if (role === "instance" && !hoveredContainerId && hoveredPanelId) {
+        const gated = hits.filter((c) => {
+          const m = getMeta(c);
+          return m?.panelId === hoveredPanelId;
+        });
+
+        if (gated.length) return gated;
+
+        const cc = closestCenter(args)
+          .filter((c) => roleOf(c) !== "panel:drop")
+          .filter((c) => {
+            const m = getMeta(c);
+            return m?.panelId === hoveredPanelId;
+          });
+
+        return cc;
+      }
+
+      // ✅ CONTAINER DRAGS: Panel-level gating
+      if (role === "container" && hoveredPanelId) {
+        const gated = hits.filter((c) => {
+          const m = getMeta(c);
+          return m?.panelId === hoveredPanelId;
+        });
+
+        if (gated.length) return gated;
+
+        const cc = closestCenter(args)
+          .filter((c) => roleOf(c) !== "panel:drop")
+          .filter((c) => {
+            const m = getMeta(c);
+            return m?.panelId === hoveredPanelId;
+          });
+
+        return cc;
+      }
+
+      const cc = closestCenter(args).filter((c) => roleOf(c) !== "panel:drop");
+      return hits.length ? hits : cc;
     },
-    [panelOverCellId]
+    [panelOverCellId, getCellFromPoint]
   );
 
   // ============================================================
@@ -517,6 +703,16 @@ export function useDnDControlCoordinator({
 
       setActiveId(evt.active.id);
       setActiveRole(activeRef.current.role);
+
+      const e = evt.activatorEvent;
+      const x = e?.clientX ?? e?.touches?.[0]?.clientX;
+      const y = e?.clientY ?? e?.touches?.[0]?.clientY;
+      if (typeof x === "number" && typeof y === "number") {
+        pointerRef.current = { x, y };
+        dragStartPointRef.current = { x, y };
+      } else {
+        dragStartPointRef.current = null;
+      }
 
       ensureDragSession();
 
@@ -551,18 +747,35 @@ export function useDnDControlCoordinator({
 
       if (!a) return;
 
-      hoveredPanelIdRef.current = getHoveredPanelId();
-      hoveredContainerIdRef.current = getHoveredContainerId();
-      refreshHotTarget();
+      const nextPanel = getHoveredPanelId();
+      const nextCont = getHoveredContainerId();
 
-      // ✅ FIX: leaving droppables => revert preview
+      if (nextPanel !== hoveredPanelIdRef.current || nextCont !== hoveredContainerIdRef.current) {
+        hoveredPanelIdRef.current = nextPanel;
+        hoveredContainerIdRef.current = nextCont;
+        refreshHotTarget();
+      }
+
+      if (a?.role === "panel") {
+        const overId = typeof o?.id === "string" ? String(o.id) : null;
+        setPanelOverCellId(overId && overId.startsWith("cell-") ? overId : null);
+      }
+
+      // ✅ KEY FIX: when over becomes null, revert preview to start snapshot
       if (!o) {
+        if (a?.role === "panel") {
+          const cell = getCellFromPointer();
+          setPanelOverCellId(cell?.cellId ?? null);
+        }
+
         if (s.dragging) resetDraftToStart();
+
+        // ✅ keep hover consistent even in gaps
+        refreshHotTarget();
         requestSoftTick();
         return;
       }
 
-      // Keep panelOverCellId synced during panel drags (prefer over id!)
       if (a.role === "panel") {
         if (typeof evt.over?.id === "string" && String(evt.over.id).startsWith("cell-")) {
           setPanelOverCellId(String(evt.over.id));
@@ -582,9 +795,7 @@ export function useDnDControlCoordinator({
       ) {
         const to = s.draftContainers.find((c) => c.id === o.containerId);
 
-        // optional safety: if overInstanceId isn't in the list, treat as append
-        let idx =
-          o.overInstanceId && to ? (to.items || []).indexOf(o.overInstanceId) : null;
+        let idx = o.overInstanceId && to ? (to.items || []).indexOf(o.overInstanceId) : null;
         if (idx != null && idx < 0) idx = null;
 
         previewMoveInstance({
@@ -596,19 +807,26 @@ export function useDnDControlCoordinator({
       }
 
       // CONTAINER PREVIEW SORT
-      if (
-        ENABLE_CONTAINER_PREVIEW_SORT &&
-        a.role === "container" &&
-        o.panelId &&
-        a.data?.panelId &&
-        s.draftPanels
-      ) {
-        previewMoveContainer({
-          draftPanels: s.draftPanels,
-          containerId: a.id,
-          toPanelId: o.panelId,
-          toIndex: null,
-        });
+      if (ENABLE_CONTAINER_PREVIEW_SORT && a.role === "container" && s.draftPanels) {
+        const toPanelId = o?.panelId ?? hoveredPanelIdRef.current;
+        if (toPanelId) {
+          const toPanel = s.draftPanels.find((p) => p.id === toPanelId);
+
+          let toIndex = null;
+
+          if (o?.role === "container" && toPanel) {
+            const overContainerId = String(o.id);
+            const idx = (toPanel.containers || []).indexOf(overContainerId);
+            toIndex = idx >= 0 ? idx : null;
+          }
+
+          previewMoveContainer({
+            draftPanels: s.draftPanels,
+            containerId: a.id,
+            toPanelId,
+            toIndex,
+          });
+        }
       }
 
       requestSoftTick();
@@ -624,94 +842,138 @@ export function useDnDControlCoordinator({
     ]
   );
 
-  // ✅ NEW: internal pointer/hover tracking during dnd-kit drags
+  const onDragMove = useCallback(() => {
+  // ✅ pointerRef is tracked by window pointer/touch move (real coords)
+  // keep this empty to avoid fighting the real pointer coords during autoscroll
+}, []);
+
+/*
   const onDragMove = useCallback(
     (evt) => {
-      const e = evt.activatorEvent;
-      const x = e?.clientX ?? e?.touches?.[0]?.clientX;
-      const y = e?.clientY ?? e?.touches?.[0]?.clientY;
+      const start = dragStartPointRef.current;
+      const dx = evt?.delta?.x ?? 0;
+      const dy = evt?.delta?.y ?? 0;
+
+      let x = null;
+      let y = null;
+
+      if (start && typeof start.x === "number" && typeof start.y === "number") {
+        x = start.x + dx;
+        y = start.y + dy;
+      }
 
       if (typeof x === "number" && typeof y === "number") {
         pointerRef.current = { x, y };
 
-        hoveredPanelIdRef.current = getHoveredPanelId();
-        hoveredContainerIdRef.current = getHoveredContainerId();
-        refreshHotTarget();
+        // ✅ Continue with normal hit testing (throttled)
+        const now = performance.now();
+        const canUpdate = now - hitTestThrottleRef.current > 16;
 
-        if (activeRef.current?.role === "panel") {
-          const cell = getCellFromPointer();
-          setPanelOverCellId(cell?.cellId ?? null);
+        if (canUpdate) {
+          hitTestThrottleRef.current = now;
+
+          const nextPanel = getHoveredPanelId();
+          const nextCont = getHoveredContainerId();
+
+          if (nextPanel !== hoveredPanelIdRef.current || nextCont !== hoveredContainerIdRef.current) {
+            hoveredPanelIdRef.current = nextPanel;
+            hoveredContainerIdRef.current = nextCont;
+          }
+
+          // ✅ ALWAYS refresh; do not depend on "over" changing
+          refreshHotTarget();
+
+          if (activeRef.current?.role === "panel") {
+            const cell = getCellFromPointer();
+            setPanelOverCellId(cell?.cellId ?? null);
+          }
         }
       }
     },
     [getHoveredPanelId, getHoveredContainerId, refreshHotTarget, getCellFromPointer]
   );
-
+*/
   const onDragEnd = useCallback(() => {
     const a = activeRef.current;
     const o = overRef.current;
-
     if (!a) return clearDragSession();
 
     // HARD COMMIT: panel -> cell (+ stack repair source + dest)
     if (a.role === "panel") {
-      const cell = getCellFromPointer();
-      if (cell) {
-        const all = getWorkingAllPanels();
-        const p0 = all.find((x) => x.id === a.id);
+      const overId = typeof overRef.current?.id === "string" ? String(overRef.current.id) : null;
 
-        if (p0) {
-          const fromRow = p0.row;
-          const fromCol = p0.col;
-          const toRow = cell.row;
-          const toCol = cell.col;
+      const cellId = overId && overId.startsWith("cell-") ? overId : panelOverCellId;
 
-          const movedCells = fromRow !== toRow || fromCol !== toCol;
+      if (cellId && cellId.startsWith("cell-")) {
+        const parts = cellId.split("-");
+        const toRow = Number(parts[1]);
+        const toCol = Number(parts[2]);
 
-          const nextPanel = {
-            ...p0,
-            row: toRow,
-            col: toCol,
-            layout: {
-              ...(p0.layout || {}),
-              style: {
-                ...((p0.layout && p0.layout.style) || {}),
-                display: "block",
+        if (Number.isFinite(toRow) && Number.isFinite(toCol)) {
+          const all = getWorkingAllPanels();
+          const p0 = all.find((x) => x.id === a.id);
+
+          if (p0) {
+            const fromRow = p0.row;
+            const fromCol = p0.col;
+
+            const movedCells = fromRow !== toRow || fromCol !== toCol;
+
+            const nextPanel = {
+              ...p0,
+              row: toRow,
+              col: toCol,
+              layout: {
+                ...(p0.layout || {}),
+                style: {
+                  ...((p0.layout && p0.layout.style) || {}),
+                  display: "block",
+                },
               },
-            },
-          };
+            };
 
-          CommitHelpers.updatePanel({
-            dispatch,
-            socket,
-            panel: nextPanel,
-            emit: true,
-          });
+            CommitHelpers.updatePanel({
+              dispatch,
+              socket,
+              panel: nextPanel,
+              emit: true,
+            });
 
-          if (movedCells) {
-            const post = all.map((x) => (x.id === a.id ? nextPanel : x));
+            if (movedCells) {
+              const post = all.map((x) => (x.id === a.id ? nextPanel : x));
 
-            const sourceCellKey = `cell-${fromRow}-${fromCol}`;
-            const destCellKey = `cell-${toRow}-${toCol}`;
+              const sourceCellKey = `cell-${fromRow}-${fromCol}`;
+              const destCellKey = `cell-${toRow}-${toCol}`;
 
-            const inCell = (panel, key) => `cell-${panel.row}-${panel.col}` === key;
+              const inCell = (panel, key) => `cell-${panel.row}-${panel.col}` === key;
 
-            const sourceStack = post.filter((x) => x.id !== a.id && inCell(x, sourceCellKey));
-            const destStack = post.filter((x) => x.id !== a.id && inCell(x, destCellKey));
+              const sourceStack = post.filter((x) => x.id !== a.id && inCell(x, sourceCellKey));
+              const destStack = post.filter((x) => x.id !== a.id && inCell(x, destCellKey));
 
-            if (sourceStack.length) {
-              const makeVisible = sourceStack[0];
+              if (sourceStack.length) {
+                const makeVisible = sourceStack[0];
 
-              LayoutHelpers.setPanelStackDisplay({
-                dispatch,
-                socket,
-                panel: makeVisible,
-                display: "block",
-                emit: true,
-              });
+                LayoutHelpers.setPanelStackDisplay({
+                  dispatch,
+                  socket,
+                  panel: makeVisible,
+                  display: "block",
+                  emit: true,
+                });
 
-              for (const other of sourceStack) {
-                if (other.id === makeVisible.id) continue;
+                for (const other of sourceStack) {
+                  if (other.id === makeVisible.id) continue;
+                  LayoutHelpers.setPanelStackDisplay({
+                    dispatch,
+                    socket,
+                    panel: other,
+                    display: "none",
+                    emit: true,
+                  });
+                }
+              }
+
+              for (const other of destStack) {
                 LayoutHelpers.setPanelStackDisplay({
                   dispatch,
                   socket,
@@ -721,34 +983,42 @@ export function useDnDControlCoordinator({
                 });
               }
             }
-
-            for (const other of destStack) {
-              LayoutHelpers.setPanelStackDisplay({
-                dispatch,
-                socket,
-                panel: other,
-                display: "none",
-                emit: true,
-              });
-            }
           }
         }
       }
     }
 
-    // ✅ HARD COMMIT: container -> panel
-    if (a.role === "container" && o?.panelId) {
-      LayoutHelpers.moveContainerBetweenPanels({
-        dispatch,
-        socket,
-        fromPanel: getWorkingAllPanels().find((p) => p.id === a.data.panelId),
-        toPanel: getWorkingAllPanels().find((p) => p.id === o.panelId),
-        containerId: a.id,
-        emit: true,
-      });
+    // HARD COMMIT: container -> panel
+    if (a.role === "container") {
+      const toPanelId = o?.panelId ?? hoveredPanelIdRef.current;
+
+      if (toPanelId) {
+        const all = getWorkingAllPanels();
+        const fromPanel = all.find((p) => p.id === a.data.panelId);
+        const toPanel = all.find((p) => p.id === toPanelId);
+
+        if (fromPanel && toPanel) {
+          let toIndex = null;
+
+          if (o?.role === "container") {
+            const idx = (toPanel.containers || []).indexOf(String(o.id));
+            toIndex = idx >= 0 ? idx : null;
+          }
+
+          LayoutHelpers.moveContainerBetweenPanels({
+            dispatch,
+            socket,
+            fromPanel,
+            toPanel,
+            containerId: a.id,
+            toIndex,
+            emit: true,
+          });
+        }
+      }
     }
 
-    // ✅ HARD COMMIT: instance -> container (with optional index)
+    // HARD COMMIT: instance -> container
     if (a.role === "instance" && o?.containerId) {
       const fromC = getWorkingContainers().find((c) => c.id === a.data.containerId);
       const toC = getWorkingContainers().find((c) => c.id === o.containerId);
@@ -762,7 +1032,7 @@ export function useDnDControlCoordinator({
         fromContainer: fromC,
         toContainer: toC,
         instanceId: a.id,
-        toIndex, // ✅ only works if your helper accepts it
+        toIndex,
         emit: true,
       });
     }
@@ -771,14 +1041,7 @@ export function useDnDControlCoordinator({
     setActiveId(null);
     setActiveRole(null);
     setPanelOverCellId(null);
-  }, [
-    dispatch,
-    socket,
-    getCellFromPointer,
-    getWorkingAllPanels,
-    getWorkingContainers,
-    clearDragSession,
-  ]);
+  }, [dispatch, socket, panelOverCellId, getWorkingAllPanels, getWorkingContainers, clearDragSession]);
 
   const onDragCancel = useCallback(() => {
     clearDragSession();
@@ -789,21 +1052,22 @@ export function useDnDControlCoordinator({
 
   // ============================================================
   // Native / cross-window bridge pointer tracking ONLY
-  // (keep window listeners, but only active during native drag mode)
   // ============================================================
   useEffect(() => {
-    // We still want hover updates while an external/native drag is in progress.
     const onMoveNative = (e) => {
       if (!nativeActiveRef.current) return;
-
       const x = e.clientX ?? e.touches?.[0]?.clientX;
       const y = e.clientY ?? e.touches?.[0]?.clientY;
 
       if (typeof x === "number" && typeof y === "number") {
         pointerRef.current = { x, y };
 
-        hoveredPanelIdRef.current = getHoveredPanelId();
-        hoveredContainerIdRef.current = getHoveredContainerId();
+        const nextPanel = getHoveredPanelId();
+        const nextCont = getHoveredContainerId();
+
+        hoveredPanelIdRef.current = nextPanel;
+        hoveredContainerIdRef.current = nextCont;
+
         refreshHotTarget();
 
         const cell = getCellFromPointer();
@@ -820,86 +1084,7 @@ export function useDnDControlCoordinator({
       window.removeEventListener("mousemove", onMoveNative);
       window.removeEventListener("touchmove", onMoveNative);
     };
-  }, [
-    getCellFromPointer,
-    getHoveredPanelId,
-    getHoveredContainerId,
-    refreshHotTarget,
-    requestSoftTick,
-  ]);
-
-  // ============================================================
-  // STACK HELPERS (draft-aware)
-  // ============================================================
-  const getStacksByCell = useCallback(() => {
-    const panels = getWorkingPanels();
-    const map = new Map(); // cellId -> panel[]
-
-    for (const p of panels) {
-      const key = cellKeyFromPanel(p);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(p);
-    }
-
-    // ✅ IMPORTANT: keep original order (do NOT reorder by display)
-    return map;
-  }, [getWorkingPanels]);
-
-  const getStackForPanel = useCallback(
-    (panel) => {
-      if (!panel) return [];
-      const key = cellKeyFromPanel(panel);
-      const map = getStacksByCell();
-      return map.get(key) || [];
-    },
-    [getStacksByCell]
-  );
-
-  const setActivePanelInCell = useCallback(
-    (row, col, nextPanelId) => {
-      const panels = getWorkingPanels();
-      const key = `cell-${row}-${col}`;
-      const stack = panels.filter((p) => cellKeyFromPanel(p) === key);
-      if (stack.length <= 1) return;
-
-      stack.forEach((p) => {
-        LayoutHelpers.setPanelStackDisplay({
-          dispatch,
-          socket,
-          panel: p,
-          display: p.id === nextPanelId ? "block" : "none",
-          emit: true,
-        });
-      });
-    },
-    [dispatch, socket, getWorkingPanels]
-  );
-
-  const cyclePanelStack = useCallback(
-    ({ panelId, dir = 1 }) => {
-      const panels = getWorkingPanels();
-      const anchor = panels.find((p) => p.id === panelId);
-      if (!anchor) return;
-
-      const stack = getStackForPanel(anchor);
-      if (stack.length <= 1) return;
-
-      const visibleIdx = stack.findIndex((p) => panelDisplay(p) !== "none");
-      const currIdx = visibleIdx >= 0 ? visibleIdx : 0;
-      const nextIdx = (currIdx + (dir >= 0 ? 1 : -1) + stack.length) % stack.length;
-
-      stack.forEach((p, idx) => {
-        LayoutHelpers.setPanelStackDisplay({
-          dispatch,
-          socket,
-          panel: p,
-          display: idx === nextIdx ? "block" : "none",
-          emit: true,
-        });
-      });
-    },
-    [dispatch, socket, getWorkingPanels, getStackForPanel]
-  );
+  }, [getCellFromPointer, getHoveredPanelId, getHoveredContainerId, refreshHotTarget, requestSoftTick]);
 
   // ============================================================
   // NATIVE / CROSS-WINDOW BRIDGE (inbound)
@@ -907,8 +1092,7 @@ export function useDnDControlCoordinator({
   const commitExternalCreate = useCallback(
     ({ containerId, label }) => {
       if (!containerId) return;
-
-      const id = crypto.randomUUID();
+      const id = makeUUID();
       const instance = { id, label: label || "Untitled" };
 
       LayoutHelpers.createInstanceInContainer({
@@ -924,7 +1108,6 @@ export function useDnDControlCoordinator({
 
   useEffect(() => {
     if (!ENABLE_NATIVE_BRIDGE) return;
-
     const el = gridRef?.current;
     if (!el) return;
 
@@ -943,7 +1126,6 @@ export function useDnDControlCoordinator({
 
       nativeActiveRef.current = hasOurMime || hasFiles || hasText;
 
-      // NOTE: ensure dnd-kit session doesn't fight us
       if (!activeRef.current) {
         activeRef.current = { id: "__native__", role: "external", data: {} };
         setActiveRole("external");
@@ -1066,13 +1248,16 @@ export function useDnDControlCoordinator({
       nativeActiveRef.current = false;
       activeRef.current = null;
 
+      // ✅ prevent stale highlight
+      hotTargetRef.current = null;
+      setHotTargetState(null);
+
       clearDragSession();
       setActiveId(null);
       setActiveRole(null);
       setPanelOverCellId(null);
     };
 
-    // ✅ FIX: dragleave is unreliable. Instead: during dragover, if pointer leaves grid rect, cancel.
     const onDragOverWindow = (e) => {
       if (!nativeActiveRef.current) return;
       const x = e.clientX;
@@ -1080,20 +1265,41 @@ export function useDnDControlCoordinator({
       if (!isInsideGrid(x, y)) {
         nativeActiveRef.current = false;
         activeRef.current = null;
+
+        // ✅ prevent stale highlight
+        hotTargetRef.current = null;
+        setHotTargetState(null);
+
         setActiveRole(null);
         setPanelOverCellId(null);
         requestSoftTick();
       }
     };
 
+    const onDragEndNative = () => {
+      if (!nativeActiveRef.current) return;
+      nativeActiveRef.current = false;
+      activeRef.current = null;
+
+      // ✅ prevent stale highlight
+      hotTargetRef.current = null;
+      setHotTargetState(null);
+
+      setActiveRole(null);
+      setPanelOverCellId(null);
+      requestSoftTick();
+    };
+
     el.addEventListener("dragover", onDragOverNative);
     el.addEventListener("drop", onDropNative);
     window.addEventListener("dragover", onDragOverWindow);
+    window.addEventListener("dragend", onDragEndNative);
 
     return () => {
       el.removeEventListener("dragover", onDragOverNative);
       el.removeEventListener("drop", onDropNative);
       window.removeEventListener("dragover", onDragOverWindow);
+      window.removeEventListener("dragend", onDragEndNative);
     };
   }, [
     gridRef,
@@ -1111,6 +1317,80 @@ export function useDnDControlCoordinator({
   ]);
 
   // ============================================================
+  // STACK HELPERS (draft-aware)
+  // ============================================================
+  const getStacksByCell = useCallback(() => {
+    const panels = getWorkingPanels();
+    const map = new Map();
+
+    for (const p of panels) {
+      const key = cellKeyFromPanel(p);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p);
+    }
+
+    return map;
+  }, [getWorkingPanels]);
+
+  const getStackForPanel = useCallback(
+    (panel) => {
+      if (!panel) return [];
+      const key = cellKeyFromPanel(panel);
+      const map = getStacksByCell();
+      return map.get(key) || [];
+    },
+    [getStacksByCell]
+  );
+
+  const setActivePanelInCell = useCallback(
+    (row, col, nextPanelId) => {
+      const panels = getWorkingPanels();
+      const key = `cell-${row}-${col}`;
+      const stack = panels.filter((p) => cellKeyFromPanel(p) === key);
+      if (stack.length <= 1) return;
+
+      stack.forEach((p) => {
+        LayoutHelpers.setPanelStackDisplay({
+          dispatch,
+          socket,
+          panel: p,
+          display: p.id === nextPanelId ? "block" : "none",
+          emit: true,
+        });
+      });
+    },
+    [dispatch, socket, getWorkingPanels]
+  );
+
+  const cyclePanelStack = useCallback(
+    ({ panelId, dir = 1 }) => {
+      const panels = getWorkingPanels();
+      const anchor = panels.find((p) => p.id === panelId);
+      if (!anchor) return;
+
+      const stack = getStackForPanel(anchor);
+      if (stack.length <= 1) return;
+
+      const visibleIdx = stack.findIndex((p) => panelDisplay(p) !== "none");
+      const currIdx = visibleIdx >= 0 ? visibleIdx : 0;
+      const nextIdx = (currIdx + (dir >= 0 ? 1 : -1) + stack.length) % stack.length;
+
+      stack.forEach((p, idx) => {
+        LayoutHelpers.setPanelStackDisplay({
+          dispatch,
+          socket,
+          panel: p,
+          display: idx === nextIdx ? "block" : "none",
+          emit: true,
+        });
+      });
+    },
+    [dispatch, socket, getWorkingPanels, getStackForPanel]
+  );
+
+  const nativeEnabled = ENABLE_NATIVE_BRIDGE;
+
+  // ============================================================
   // public api
   // ============================================================
   return {
@@ -1118,7 +1398,7 @@ export function useDnDControlCoordinator({
     collisionDetection,
     onDragStart,
     onDragOver,
-    onDragMove, // ✅ NEW: wire this in GridInner's DndContext
+    onDragMove,
     onDragEnd,
     onDragCancel,
 
@@ -1131,27 +1411,25 @@ export function useDnDControlCoordinator({
     getWorkingAllPanels,
     getWorkingContainers,
 
-    // ✅ centralized hover surface
-    hotTarget: hotTargetRef.current,
+    // ✅ NOW STATE-DRIVEN so renders are not “1 behind”
+    hotTarget: hotTargetState,
 
-    // ✅ re-exposed stack helpers
     getStacksByCell,
     getStackForPanel,
     setActivePanelInCell,
     cyclePanelStack,
 
-    // ✅ hit testing (kept for debug / internal; don’t use in components)
     getHoveredPanelId,
     getHoveredContainerId,
 
     isContainerDrag,
     isInstanceDrag,
 
-    // refs (debug / advanced overlays)
     activeRef,
     overRef,
     pointerRef,
 
     nativeActiveRef,
+    nativeEnabled,
   };
 }

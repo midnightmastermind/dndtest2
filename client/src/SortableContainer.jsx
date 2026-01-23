@@ -1,4 +1,11 @@
-// SortableContainer.jsx — UPDATED: CommitHelpers emit-flag support + safer label commit
+// SortableContainer.jsx — MERGED (emit-flag + REQUIRED data-container-id + container sortable disabled during instance/external drag)
+//
+// Fixes merged in:
+// ✅ Support native/external drags: isExternalDrag + dragRole (passed from Panel)
+// ✅ Container sortable disabled during external drag too (prevents reorder/collision weirdness)
+// ✅ Highlight drop when (instance OR external) and this container is hot
+// ✅ List droppable stays enabled for external drops too
+
 import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -25,12 +32,17 @@ function SortableContainerInner({
   isDraggingContainer,
   isInstanceDrag,
 
-  // ✅ from parent
+  // ✅ from parent (hotTarget-driven)
   isHot = false,
   hotRole = "",
 
+  // ✅ NEW (for native/cross-window inbound)
+  isExternalDrag = false,
+  dragRole = null,
+
+  nativeEnabled = false,
   dispatch,
-  socket, // ✅ required for hard commits
+  socket,
 }) {
   const onAdd = useCallback(
     () => addInstanceToContainer(container.id),
@@ -45,10 +57,8 @@ function SortableContainerInner({
 
   const commitLabel = useCallback(() => {
     const next = (draft?.label ?? "").trim();
-    // allow empty label? keep your old behavior: ignore empty commits.
     if (!next) return;
 
-    // ✅ HARD commit (dispatch + emit)
     CommitHelpers.updateContainer({
       dispatch,
       socket,
@@ -66,20 +76,28 @@ function SortableContainerInner({
     });
   }, [container.id, dispatch, socket]);
 
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({
-      id: container.id,
-      data: {
-        role: "container",
-        containerId: container.id,
-        panelId,
-        label: container.label,
-      },
-      transition: {
-        duration: 120,
-        easing: "cubic-bezier(0.25, 1, 0.5, 1)",
-      },
-    });
+  // ✅ IMPORTANT: disable container sortable during instance/external drags
+  const {
+    setNodeRef,
+    attributes,
+    listeners,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: container.id,
+    disabled: isInstanceDrag || isExternalDrag,
+    data: {
+      role: "container",
+      containerId: container.id,
+      panelId,
+      label: container.label,
+    },
+    transition: {
+      duration: 120,
+      easing: "cubic-bezier(0.25, 1, 0.5, 1)",
+    },
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -95,40 +113,47 @@ function SortableContainerInner({
 
   const itemIds = useMemo(() => items.map((x) => x.id), [items]);
 
-  // ✅ SINGLE droppable for entire container dropzone (top+list+bottom combined)
+  // ✅ SINGLE droppable for entire container (hitbox)
   const list = useDroppable({
     id: `list:${container.id}`,
     disabled: isDraggingContainer,
     data: {
       role: "container:list",
       containerId: container.id,
-      label: container.label,
       panelId,
+      label: container.label,
     },
   });
 
   const DEBUG_HITBOXES = false;
-  const highlightDrop = isInstanceDrag && isHot;
-  const handleDragProps = isInstanceDrag ? {} : { ...attributes, ...listeners };
+
+  // ✅ highlight during instance OR external drags when coordinator says we're hot
+  const highlightDrop = (isInstanceDrag || isExternalDrag) && isHot;
+
+  // During instance/external drags, don't allow container handle to drag (sortable disabled anyway)
+  const handleDragProps =
+    isInstanceDrag || isExternalDrag ? {} : { ...attributes, ...listeners };
 
   return (
-  
-  <div
-    ref={setNodeRef}
-    data-container-id={container.id} // ✅ REQUIRED for getHoveredContainerId()
-    style={{
-      ...style,
-      display: "flex",
-      flexDirection: "column",
-      height: "100%",
-      minHeight: 0,
-      overflow: "visible",
-      outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "0px solid transparent",
-      outlineOffset: 0,
-      borderRadius: 10,
-    }}
-    className="container-shell bg-background2 rounded-md border border-border shadow-inner"
-  >
+    <div
+      ref={setNodeRef}
+      data-container-id={container.id} // ✅ REQUIRED for coordinator.getHoveredContainerId()
+      style={{
+        ...style,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: 0,
+        overflow: "visible",
+        outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "0px solid transparent",
+        outlineOffset: 0,
+        borderRadius: 10,
+        pointerEvents: isDragging ? "none" : "auto",
+        position: "relative",
+        zIndex: isDragging ? 0 : 1,
+      }}
+      className="container-shell bg-background2 rounded-md border border-border shadow-inner"
+    >
       {/* HEADER */}
       <div
         className="container-header no-select"
@@ -137,6 +162,7 @@ function SortableContainerInner({
           flex: "0 0 auto",
           display: "flex",
           alignItems: "end",
+          // ✅ when the container is the hot drop, let the list surface be the interaction target
           pointerEvents: highlightDrop ? "none" : "auto",
           gap: 6,
         }}
@@ -149,10 +175,7 @@ function SortableContainerInner({
           <GripVertical className="h-4 w-4 text-white" />
         </div>
 
-        <div
-          className="font-mono text-[10px] sm:text-xs"
-          style={{ fontWeight: 500, paddingLeft: 3 }}
-        >
+        <div className="font-mono text-[10px] sm:text-xs" style={{ fontWeight: 500, paddingLeft: 3 }}>
           {container.label}
         </div>
 
@@ -174,10 +197,7 @@ function SortableContainerInner({
       </div>
 
       {/* BODY */}
-      <div
-        className="container-body"
-        style={{ flex: 1, overflow: "visible", display: "flex" }}
-      >
+      <div className="container-body" style={{ flex: 1, overflow: "visible", display: "flex" }}>
         <div className="container-list-wrap" style={{ position: "relative", flex: 1 }}>
           <div
             ref={list.setNodeRef}
@@ -189,8 +209,8 @@ function SortableContainerInner({
               bottom: -5,
               borderRadius: 10,
               background: DEBUG_HITBOXES ? "rgba(255,0,0,0.15)" : "unset",
-              zIndex: 2,
-              pointerEvents: "none",
+              zIndex: 0,
+              pointerEvents: "auto",
               maxWidth: "unset",
               minHeight: "60px",
             }}
@@ -213,7 +233,9 @@ function SortableContainerInner({
                     containerId={container.id}
                     panelId={panelId}
                     dispatch={dispatch}
-                    socket={socket} // ✅ pass through for InstanceInner commits
+                    socket={socket}
+                    disabled={isDraggingContainer}
+                    nativeEnabled={nativeEnabled}
                   />
                 ))}
               </SortableContext>
@@ -241,7 +263,12 @@ export default React.memo(SortableContainerInner, (prev, next) => {
   if (prev.isHot !== next.isHot) return false;
   if (prev.hotRole !== next.hotRole) return false;
 
+  if (prev.isExternalDrag !== next.isExternalDrag) return false;
+  if (prev.dragRole !== next.dragRole) return false;
+
   if (prev.dispatch !== next.dispatch) return false;
   if (prev.socket !== next.socket) return false;
+  if (prev.nativeEnabled !== next.nativeEnabled) return false;
+
   return true;
 });
