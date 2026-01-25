@@ -21,16 +21,17 @@ import { GridActionsContext } from "./GridActionsContext";
 
 import { DragProvider } from "./helpers/DragProvider";
 import { useDragContext, useDroppable, DragType, DropAccepts } from "./helpers/dragSystem";
+import * as CommitHelpers from "./helpers/CommitHelpers";
 
 // ============================================================
 // GRID CELL - Drop zone for panels
 // ============================================================
-const GridCell = React.memo(function GridCell({ r, c, dark }) {
+const GridCell = React.memo(function GridCell({ r, c, dark, hasPanel }) {
   const dragCtx = useDragContext();
   const { isPanelDrag, panelOverCellId } = dragCtx;
 
   const cellId = `cell-${r}-${c}`;
-  
+
   // DROP ZONE: Accepts panels
   const { ref, isOver } = useDroppable({
     type: "grid-cell",
@@ -48,11 +49,35 @@ const GridCell = React.memo(function GridCell({ r, c, dark }) {
       data-id={cellId}
       className={[
         "grid-cell",
-        dark ? "is-dark" : "is-light",
         highlight ? "is-highlight" : "",
       ].join(" ")}
       style={{ gridRow: r + 1, gridColumn: c + 1 }}
-    />
+    >
+      {/* Show pocket effect when cell is empty */}
+      {!hasPanel && (
+        <div
+          style={{
+            position: "absolute",
+            inset: "6px",
+            borderRadius: "8px",
+            background: "rgba(20, 25, 30, 0.4)",
+            border: "1px solid rgba(0, 0, 0, 0.5)",
+            boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            className="text-xs text-muted-foreground p-2 text-center"
+            style={{ fontStyle: "italic", opacity: 0.6 }}
+          >
+            Drop panel here
+          </div>
+        </div>
+      )}
+    </div>
   );
 });
 
@@ -66,6 +91,8 @@ function GridRender({
   cols,
   colTemplate,
   rowTemplate,
+  colSizes,
+  rowSizes,
   panelsRender,
   containersById,
   dispatch,
@@ -76,16 +103,36 @@ function GridRender({
   addInstanceToContainer,
   instancesById,
   sizesRef,
+  onStartColResize,
+  onStartRowResize,
 }) {
   const cellsData = useMemo(() => {
     const arr = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        arr.push({ r, c, dark: (r + c) % 2 === 0 });
+        // Check if any visible panel occupies this cell (as its primary cell)
+        const hasPanel = panelsRender.some((p) => {
+          const display = p?.layout?.style?.display ?? "block";
+          return display !== "none" && p.row === r && p.col === c;
+        });
+        arr.push({ r, c, dark: (r + c) % 2 === 0, hasPanel });
       }
     }
     return arr;
-  }, [rows, cols]);
+  }, [rows, cols, panelsRender]);
+
+  // Calculate positions for resize handles
+  const getColPosition = useCallback((i) => {
+    const total = colSizes.reduce((a, b) => a + b, 0);
+    const before = colSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
+    return (before / total) * 100;
+  }, [colSizes]);
+
+  const getRowPosition = useCallback((i) => {
+    const total = rowSizes.reduce((a, b) => a + b, 0);
+    const before = rowSizes.slice(0, i + 1).reduce((a, b) => a + b, 0);
+    return (before / total) * 100;
+  }, [rowSizes]);
 
   return (
     <div
@@ -106,8 +153,68 @@ function GridRender({
         transition: "opacity 0.15s ease",
       }}
     >
-      {cellsData.map(({ r, c, dark }) => (
-        <GridCell key={`cell-${r}-${c}`} r={r} c={c} dark={dark} />
+      {cellsData.map(({ r, c, dark, hasPanel }) => (
+        <GridCell key={`cell-${r}-${c}`} r={r} c={c} dark={dark} hasPanel={hasPanel} />
+      ))}
+
+      {/* Vertical resize handles (between columns) */}
+      {[...Array(cols - 1)].map((_, i) => (
+        <div
+          key={`col-resize-${i}`}
+          onMouseDown={(e) => onStartColResize(e, i)}
+          onTouchStart={(e) => onStartColResize(e, i)}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${getColPosition(i)}%`,
+            width: 6,
+            transform: 'translateX(-50%)',
+            cursor: "col-resize",
+            zIndex: 50,
+            background: "#8f969eff",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg width="4" height="16" viewBox="0 0 4 16" style={{ opacity: 0.6 }}>
+            <circle cx="2" cy="4" r="1" fill="white" />
+            <circle cx="2" cy="8" r="1" fill="white" />
+            <circle cx="2" cy="12" r="1" fill="white" />
+          </svg>
+        </div>
+      ))}
+
+      {/* Horizontal resize handles (between rows) */}
+      {[...Array(rows - 1)].map((_, i) => (
+        <div
+          key={`row-resize-${i}`}
+          onMouseDown={(e) => onStartRowResize(e, i)}
+          onTouchStart={(e) => onStartRowResize(e, i)}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: `${getRowPosition(i)}%`,
+            height: 6,
+            transform: 'translateY(-50%)',
+            cursor: "row-resize",
+            zIndex: 50,
+            background: "#8f969eff",
+            borderRadius: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg width="16" height="4" viewBox="0 0 16 4" style={{ opacity: 0.6 }}>
+            <circle cx="4" cy="2" r="1" fill="white" />
+            <circle cx="8" cy="2" r="1" fill="white" />
+            <circle cx="12" cy="2" r="1" fill="white" />
+          </svg>
+        </div>
       ))}
 
       {panelsRender.map((p) => {
@@ -211,6 +318,122 @@ function GridInner({ components }) {
     return m;
   }, [state.panels]);
 
+  // Grid resize functionality
+  const resizePendingRef = useRef({ rowSizes: null, colSizes: null });
+
+  const finalizeResize = useCallback(() => {
+    const pending = resizePendingRef.current;
+    if (!pending.rowSizes && !pending.colSizes) return;
+    if (!gridId) return;
+
+    const nextRowSizes = pending.rowSizes ?? rowSizes;
+    const nextColSizes = pending.colSizes ?? colSizes;
+
+    CommitHelpers.updateGrid({
+      dispatch,
+      socket,
+      gridId,
+      grid: { rowSizes: nextRowSizes, colSizes: nextColSizes },
+      emit: true,
+    });
+
+    resizePendingRef.current = { rowSizes: null, colSizes: null };
+  }, [gridId, rowSizes, colSizes, dispatch, socket]);
+
+  const getGridWidth = () => gridRef.current?.clientWidth || 1;
+  const getGridHeight = () => gridRef.current?.clientHeight || 1;
+
+  const resizeColumn = useCallback((i, pixelDelta) => {
+    const gridWidth = getGridWidth();
+    setColSizes((sizes) => {
+      const next = i + 1;
+      if (next >= sizes.length) return sizes;
+
+      const total = sizes.reduce((a, b) => a + b, 0);
+      const frDelta = (pixelDelta / gridWidth) * total;
+
+      const copy = [...sizes];
+      copy[i] = Math.max(0.3, copy[i] + frDelta);
+      copy[next] = Math.max(0.3, copy[next] - frDelta);
+
+      resizePendingRef.current.colSizes = copy;
+      return copy;
+    });
+  }, []);
+
+  const resizeRow = useCallback((i, pixelDelta) => {
+    const gridHeight = getGridHeight();
+    setRowSizes((sizes) => {
+      const next = i + 1;
+      if (next >= sizes.length) return sizes;
+
+      const total = sizes.reduce((a, b) => a + b, 0);
+      const frDelta = (pixelDelta / gridHeight) * total;
+
+      const copy = [...sizes];
+      copy[i] = Math.max(0.3, copy[i] + frDelta);
+      copy[next] = Math.max(0.3, copy[next] - frDelta);
+
+      resizePendingRef.current.rowSizes = copy;
+      return copy;
+    });
+  }, []);
+
+  const getClientX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
+  const getClientY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
+
+  const startColResize = useCallback((e, i) => {
+    e.preventDefault();
+    let startX = getClientX(e);
+
+    const move = (ev) => {
+      ev.preventDefault();
+      const currentX = getClientX(ev);
+      const delta = currentX - startX;
+      startX = currentX;
+      resizeColumn(i, delta);
+    };
+
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", stop);
+      finalizeResize();
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("touchmove", move);
+    window.addEventListener("touchend", stop);
+  }, [resizeColumn, finalizeResize]);
+
+  const startRowResize = useCallback((e, i) => {
+    e.preventDefault();
+    let startY = getClientY(e);
+
+    const move = (ev) => {
+      ev.preventDefault();
+      const currentY = getClientY(ev);
+      const delta = currentY - startY;
+      startY = currentY;
+      resizeRow(i, delta);
+    };
+
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", stop);
+      finalizeResize();
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("touchmove", move);
+    window.addEventListener("touchend", stop);
+  }, [resizeRow, finalizeResize]);
+
   return (
     <DragProvider
       state={state}
@@ -231,6 +454,8 @@ function GridInner({ components }) {
         cols={cols}
         colTemplate={colTemplate}
         rowTemplate={rowTemplate}
+        colSizes={colSizes}
+        rowSizes={rowSizes}
         panelsRender={visiblePanels}
         containersById={containersById}
         dispatch={dispatch}
@@ -241,6 +466,8 @@ function GridInner({ components }) {
         addInstanceToContainer={addInstanceToContainer}
         instancesById={instancesById}
         sizesRef={sizesRef}
+        onStartColResize={startColResize}
+        onStartRowResize={startRowResize}
       />
 
       <FullscreenOverlay

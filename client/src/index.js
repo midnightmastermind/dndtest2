@@ -1,31 +1,17 @@
-// helpers/index.js
-// ============================================================
-// UNIFIED DRAG SYSTEM - PUBLIC API
-// ============================================================
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App';
+import reportWebVitals from './reportWebVitals';
 
-// Core hooks
-export {
-  useDraggable,
-  useDroppable,
-  useDragDrop,
-  useDragContext,
-} from "./dragSystem";
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
 
-// Types & constants
-export {
-  DragType,
-  DropAccepts,
-  NATIVE_DND_MIME,
-  DragContext,
-} from "./dragSystem";
-
-// Provider
-export { DragProvider } from "./DragProvider";
-
-// Utilities (for advanced use)
-export {
-  createPayload,
-  serializePayload,
-  parseExternalDrop,
-  getWindowId,
-} from "./dragSystem";
+// If you want to start measuring performance in your app, pass a function
+// to log results (for example: reportWebVitals(console.log))
+// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
+reportWebVitals();

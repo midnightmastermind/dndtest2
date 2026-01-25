@@ -1,0 +1,17 @@
+# Ignore dependencies and build outputs
+node_modules/
+dist/
+build/
+.git/
+coverage/
+
+# Ignore large data files that burn tokens
+*.csv
+*.log
+*.json
+*.lock
+
+# Ignore sensitive env files (Security + Token saving)
+.env
+.env.local
+secrets/

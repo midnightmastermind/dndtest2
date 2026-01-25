@@ -4,7 +4,7 @@
 // DROP: List accepts INSTANCE, FILE, TEXT, URL
 // ============================================================
 
-import React, { useMemo, useCallback, useState, useEffect, useRef } from "react";
+import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 
 import SortableInstance from "./SortableInstance";
@@ -13,16 +13,18 @@ import ButtonPopover from "./ui/ButtonPopover";
 import ContainerForm from "./ui/ContainerForm";
 
 import * as CommitHelpers from "./helpers/CommitHelpers";
-import { useDraggable, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
+import { useDragDrop, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
 
 function SortableContainer({
   container,
   panelId,
+  panelLayoutOrientation = 'vertical',
   instancesById,
   addInstanceToContainer,
   isHot = false,
   dispatch,
   socket,
+  gapPx = 12,
 }) {
   // ============================================================
   // CONTEXT
@@ -55,20 +57,40 @@ function SortableContainer({
   }, [container.id, dispatch, socket]);
 
   // ============================================================
-  // DRAG: Container header is draggable (disabled during instance drags)
+  // LAYOUT DETECTION
   // ============================================================
-  const { ref: dragRef, isDragging } = useDraggable({
+  // Allow ALL four edges for maximum flexibility
+  // Users can drop containers from any direction, insertion position calculated by closest edge
+  const containerAllowedEdges = useMemo(() => ['top', 'bottom', 'left', 'right'], []);
+
+  // ============================================================
+  // DRAG+DROP: Container is both draggable and accepts other containers for reordering
+  // ============================================================
+  const { ref: containerRef, isDragging, isOver: isContainerOver, closestEdge, props: containerProps } = useDragDrop({
     type: DragType.CONTAINER,
     id: container.id,
     data: container,
     context: { panelId, containerId: container.id },
     disabled: isInstanceDrag || isExternalDrag,
+    accepts: [DragType.CONTAINER], // Only accept other containers for reordering
+    allowedEdges: containerAllowedEdges,
+  });
+
+  // ============================================================
+  // DROP: Container header accepts instances/external (inserts at top of list)
+  // ============================================================
+  const { ref: headerDropRef, isOver: isHeaderOver } = useDroppable({
+    type: "container-header",
+    id: `container-header:${container.id}`,
+    context: { panelId, containerId: container.id, insertAt: 0 }, // insertAt: 0 signals top insertion
+    accepts: DropAccepts.CONTAINER_LIST,
+    disabled: isContainerDrag,
   });
 
   // ============================================================
   // DROP: Container list accepts instances + external
   // ============================================================
-  const { ref: dropRef, isOver } = useDroppable({
+  const { ref: listDropRef, isOver: isListOver } = useDroppable({
     type: "container-list",
     id: `container-list:${container.id}`,
     context: { panelId, containerId: container.id },
@@ -86,19 +108,19 @@ function SortableContainer({
   // ============================================================
   // HIGHLIGHT
   // ============================================================
-  const highlightDrop = (isInstanceDrag || isExternalDrag) && (isHot || isOver);
+  const highlightDrop = (isInstanceDrag || isExternalDrag) && (isHot || isHeaderOver || isListOver);
 
   // ============================================================
   // RENDER
   // ============================================================
   return (
     <div
+      ref={containerRef}
       data-container-id={container.id}
       className="container-shell bg-background2 rounded-md border border-border shadow-inner"
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100%",
         minHeight: 0,
         overflow: "visible",
         outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "none",
@@ -107,13 +129,72 @@ function SortableContainer({
         pointerEvents: isDragging ? "none" : "auto",
         position: "relative",
         zIndex: isDragging ? 0 : 1,
-        opacity: isDragging ? 0.3 : 1,
+        opacity: isDragging ? 0.4 : 1,
         transition: "opacity 0.15s, outline 0.1s",
       }}
+      {...containerProps}
     >
-      {/* HEADER - Draggable */}
+      {/* Drop Indicator - Container Reordering */}
+      {isContainerOver && closestEdge === "top" && (
+        <div
+          style={{
+            position: "absolute",
+            top: -2,
+            left: 0,
+            right: 0,
+            height: 2,
+            backgroundColor: "rgb(50, 150, 255)",
+            borderRadius: 1,
+            zIndex: 10,
+          }}
+        />
+      )}
+      {isContainerOver && closestEdge === "bottom" && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: -2,
+            left: 0,
+            right: 0,
+            height: 2,
+            backgroundColor: "rgb(50, 150, 255)",
+            borderRadius: 1,
+            zIndex: 10,
+          }}
+        />
+      )}
+      {isContainerOver && closestEdge === "left" && (
+        <div
+          style={{
+            position: "absolute",
+            left: -2,
+            top: 0,
+            bottom: 0,
+            width: 2,
+            backgroundColor: "rgb(50, 150, 255)",
+            borderRadius: 1,
+            zIndex: 10,
+          }}
+        />
+      )}
+      {isContainerOver && closestEdge === "right" && (
+        <div
+          style={{
+            position: "absolute",
+            right: -2,
+            top: 0,
+            bottom: 0,
+            width: 2,
+            backgroundColor: "rgb(50, 150, 255)",
+            borderRadius: 1,
+            zIndex: 10,
+          }}
+        />
+      )}
+
+      {/* HEADER - Draggable & Droppable (for inserting at top) */}
       <div
-        ref={dragRef}
+        ref={headerDropRef}
         className="container-header no-select"
         style={{
           userSelect: "none",
@@ -123,12 +204,12 @@ function SortableContainer({
           padding: "4px 6px",
           borderBottom: "1px solid var(--border)",
           cursor: (isInstanceDrag || isExternalDrag) ? "default" : "grab",
-          pointerEvents: highlightDrop ? "none" : "auto",
+          background: isHeaderOver ? "rgba(50, 150, 255, 0.1)" : "transparent",
+          transition: "background 0.1s",
+          position: "relative",
         }}
       >
-        {!(isInstanceDrag || isExternalDrag) && (
-          <GripVertical className="h-4 w-4 text-muted-foreground mr-1" />
-        )}
+        <GripVertical className="h-4 w-4 text-muted-foreground mr-1" />
 
         <span className="text-xs font-medium flex-1 truncate">
           {container.label || "Container"}
@@ -149,39 +230,107 @@ function SortableContainer({
             />
           </ButtonPopover>
         </div>
+
+        {/* Top drop indicator - when hovering header to insert at top of list */}
+        {/* Only show if container has items */}
+        {isHeaderOver && items.length > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: -1,
+              left: 4,
+              right: 4,
+              height: 2,
+              backgroundColor: "rgb(50, 150, 255)",
+              borderRadius: 1,
+              zIndex: 10,
+            }}
+          />
+        )}
       </div>
 
       {/* LIST - Droppable */}
       <div
-        ref={dropRef}
+        ref={listDropRef}
         className="container-list"
         style={{
-          flex: 1,
-          minHeight: 60,
+          flex: items.length === 0 ? 1 : "0 0 auto",
+          minHeight: items.length === 0 ? 40 : "fit-content",
           overflow: "auto",
-          padding: 4,
+          padding: 0,
+          display: "flex",
+          flexDirection: "column",
+          background: isListOver ? "rgba(50, 150, 255, 0.05)" : "transparent",
+          transition: "background 0.1s",
+          position: "relative",
         }}
       >
-        {items.map((instance) => (
-          <SortableInstance
-            key={instance.id}
-            instance={instance}
-            containerId={container.id}
-            panelId={panelId}
-            dispatch={dispatch}
-            socket={socket}
-          />
-        ))}
+        {/* Always-visible pocket background */}
+        <div
+          style={{
+            position: "absolute",
+            top: "5px",
+            left: "5px",
+            right: "5px",
+            bottom: items.length === 0 ? "8px" : "36px",
+            minHeight: items.length === 0 ? "36px" : 0,
+            borderRadius: "4px",
+            background: "rgba(20, 25, 30, 0.4)",
+            border: "1px solid rgba(0, 0, 0, 0.5)",
+            boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+            pointerEvents: "none",
+            zIndex: 0,
+          }}
+        />
 
-        {items.length === 0 && (
-          <div
-            className="text-xs text-muted-foreground p-2 text-center"
-            style={{ fontStyle: "italic", opacity: 0.6 }}
-          >
-            Drop items here
-          </div>
-        )}
+        <div style={{ position: "relative", zIndex: 1, padding: "5px", flex: 1, display: "flex", flexDirection: "column" }}>
+          {items.map((instance) => (
+            <SortableInstance
+              key={instance.id}
+              instance={instance}
+              containerId={container.id}
+              panelId={panelId}
+              dispatch={dispatch}
+              socket={socket}
+              allowedEdges={containerAllowedEdges}
+            />
+          ))}
+
+          {items.length === 0 && (
+            <div
+              className="text-xs text-muted-foreground p-2 text-center"
+              style={{
+                fontStyle: "italic",
+                opacity: 0.6,
+                position: "relative",
+                zIndex: 2,
+                marginTop: "-5px",
+                minHeight: "36px",
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              Drop items here
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Invisible hitbox extending into gap below container */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: gapPx,
+          marginBottom: -gapPx,
+          pointerEvents: "auto",
+          zIndex: 2,
+        }}
+      />
     </div>
   );
 }

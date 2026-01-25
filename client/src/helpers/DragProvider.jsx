@@ -20,6 +20,7 @@ import {
   NATIVE_DND_MIME,
   parseExternalDrop,
   getWindowId,
+  setupAutoScroll,
 } from "./dragSystem";
 import * as CommitHelpers from "./CommitHelpers";
 import * as LayoutHelpers from "./LayoutHelpers";
@@ -96,6 +97,7 @@ export function DragProvider({
 
   const pointerRef = useRef({ x: 0, y: 0 });
   const rafRef = useRef(0);
+  const lastDropRef = useRef({ payload: null, containerId: null, timestamp: 0 });
 
   // ============================================================
   // BASE DATA
@@ -312,16 +314,129 @@ export function DragProvider({
         setPanelOverCellId(cell?.cellId || null);
       }
 
+      // Auto-scroll panel content when dragging instances/containers/external (not panels)
+      const isDraggingPanel = s.payload?.type === DragType.PANEL;
+      if (panelId && !isDraggingPanel) {
+        const panelElement = document.querySelector(`[data-panel-id="${panelId}"]`);
+        if (panelElement) {
+          const panelRect = panelElement.getBoundingClientRect();
+          const panelContent = panelElement.querySelector('.panel-content');
+
+          if (panelContent && panelContent.scrollHeight > panelContent.clientHeight) {
+            const scrollZone = 80; // Pixels from top/bottom to trigger scroll
+            const scrollSpeed = 10; // Pixels per frame
+
+            // Check if cursor is in top zone (including header)
+            if (clientY < panelRect.top + scrollZone) {
+              panelContent.scrollTop = Math.max(0, panelContent.scrollTop - scrollSpeed);
+            }
+            // Check if cursor is in bottom zone
+            else if (clientY > panelRect.bottom - scrollZone) {
+              panelContent.scrollTop = Math.min(
+                panelContent.scrollHeight - panelContent.clientHeight,
+                panelContent.scrollTop + scrollSpeed
+              );
+            }
+          }
+        }
+      }
+
       // Live preview for instance sorting
       if (s.payload?.type === DragType.INSTANCE && containerId) {
         const toC = s.draftContainers?.find((c) => c.id === containerId);
-        const idx = instanceId && toC ? (toC.items || []).indexOf(instanceId) : null;
-        previewMoveInstance({ instanceId: s.payload.id, toContainerId: containerId, toIndex: idx });
+        let toIndex = null;
+
+        if (toC && instanceId && instanceId !== s.payload.id) {
+          const items = toC.items || [];
+          const hoveredIndex = items.indexOf(instanceId);
+
+          if (hoveredIndex !== -1) {
+            // Calculate edge from cursor position
+            const instanceEl = document.querySelector(`[data-instance-id="${instanceId}"]`);
+            if (instanceEl) {
+              const rect = instanceEl.getBoundingClientRect();
+              const { x, y } = pointerRef.current;
+
+              // Determine container orientation
+              const isHorizontal = toC.layout?.orientation === 'horizontal';
+
+              // Calculate which side of the element we're on
+              if (isHorizontal) {
+                const midX = rect.left + rect.width / 2;
+                const isLeft = x < midX;
+                toIndex = isLeft ? hoveredIndex : hoveredIndex + 1;
+              } else {
+                const midY = rect.top + rect.height / 2;
+                const isTop = y < midY;
+                toIndex = isTop ? hoveredIndex : hoveredIndex + 1;
+              }
+
+              // Adjust if moving within same container
+              const fromC = s.startContainers?.find((c) => c.id === s.payload.context?.containerId);
+              if (fromC && fromC.id === toC.id) {
+                const fromIndex = items.indexOf(s.payload.id);
+                if (fromIndex !== -1 && fromIndex < hoveredIndex) {
+                  toIndex = Math.max(0, toIndex - 1);
+                }
+              }
+            }
+          }
+        }
+
+        previewMoveInstance({ instanceId: s.payload.id, toContainerId: containerId, toIndex });
       }
 
       // Live preview for container sorting
       if (s.payload?.type === DragType.CONTAINER && panelId) {
-        previewMoveContainer({ containerId: s.payload.id, toPanelId: panelId, toIndex: null });
+        const toPanel = s.draftPanels?.find((p) => p.id === panelId);
+        const hoveredContainerId = getHoveredContainerId();
+        let toIndex = null;
+
+        if (toPanel && hoveredContainerId && hoveredContainerId !== s.payload.id) {
+          const containerList = toPanel.containers || [];
+          const hoveredIndex = containerList.indexOf(hoveredContainerId);
+
+          if (hoveredIndex !== -1) {
+            // Calculate edge from cursor position - use 4-directional detection
+            const containerEl = document.querySelector(`[data-container-id="${hoveredContainerId}"]`);
+            if (containerEl) {
+              const rect = containerEl.getBoundingClientRect();
+              const { x, y } = pointerRef.current;
+
+              // Calculate distances to all four edges
+              const distanceToTop = Math.abs(y - rect.top);
+              const distanceToBottom = Math.abs(y - rect.bottom);
+              const distanceToLeft = Math.abs(x - rect.left);
+              const distanceToRight = Math.abs(x - rect.right);
+
+              // Find closest edge
+              const minDistance = Math.min(distanceToTop, distanceToBottom, distanceToLeft, distanceToRight);
+              let closestEdge;
+              if (minDistance === distanceToTop) closestEdge = 'top';
+              else if (minDistance === distanceToBottom) closestEdge = 'bottom';
+              else if (minDistance === distanceToLeft) closestEdge = 'left';
+              else closestEdge = 'right';
+
+              // All edges use sequential insertion - layout determines visual arrangement
+              if (closestEdge === 'top' || closestEdge === 'left') {
+                toIndex = hoveredIndex;  // Insert before
+              } else {
+                toIndex = hoveredIndex + 1;  // Insert after
+              }
+
+              // Adjust if moving within same panel
+              const fromPanel = s.startPanels?.find((p) => p.id === s.payload.context?.panelId);
+              if (fromPanel && fromPanel.id === toPanel.id) {
+                const fromIndex = containerList.indexOf(s.payload.id);
+                if (fromIndex !== -1 && fromIndex < hoveredIndex) {
+                  toIndex = Math.max(0, toIndex - 1);
+                }
+              }
+            }
+          }
+        }
+
+        previewMoveContainer({ containerId: s.payload.id, toPanelId: panelId, toIndex });
       }
 
       onTick?.();
@@ -346,26 +461,61 @@ export function DragProvider({
   // ============================================================
   const handleDrop = useCallback((dropTarget) => {
     const s = sessionRef.current;
-    if (!s.dragging) {
+
+    // For external drops (files, text, URLs), there's no session, so use the source from dropTarget
+    const payload = s?.payload || dropTarget?.source;
+
+    if (!s.dragging && !payload) {
       clearSession();
       return;
     }
 
-    const payload = s.payload;
     const { x, y } = pointerRef.current;
-    
+
     // Resolve targets from hit testing + drop target context
     const panelId = dropTarget.context?.panelId || getHoveredPanelId();
     const containerId = dropTarget.context?.containerId || getHoveredContainerId();
     const instanceId = dropTarget.context?.instanceId || getHoveredInstanceId();
 
     // ============================================================
+    // DEDUPLICATION - Prevent multiple drop zones from handling the same drop
+    // ============================================================
+    const now = Date.now();
+    const last = lastDropRef.current;
+    const isDuplicate =
+      last.payload === payload?.id &&
+      last.containerId === containerId &&
+      (now - last.timestamp) < 100; // 100ms window for duplicate detection
+
+    if (isDuplicate) {
+      return;
+    }
+
+    // Record this drop
+    lastDropRef.current = {
+      payload: payload?.id,
+      containerId,
+      timestamp: now,
+    };
+
+    // ============================================================
     // PANEL → CELL
     // ============================================================
     if (payload?.type === DragType.PANEL) {
-      const cell = getCellFromPoint(x, y);
+      // Use grid cell context if available (from grid-cell drop zone), otherwise fall back to getCellFromPoint
+      let cell = null;
+      if (dropTarget.type === "grid-cell" && dropTarget.context?.row !== undefined && dropTarget.context?.col !== undefined) {
+        cell = {
+          row: dropTarget.context.row,
+          col: dropTarget.context.col,
+          cellId: dropTarget.context.cellId,
+        };
+      } else {
+        cell = getCellFromPoint(x, y);
+      }
+
       if (cell) {
-        const panel = getWorkingAllPanels().find((p) => p.id === payload.id);
+        const panel = baseAllPanels.find((p) => p.id === payload.id);
         if (panel && (panel.row !== cell.row || panel.col !== cell.col)) {
           const fromRow = panel.row, fromCol = panel.col;
           const toRow = cell.row, toCol = cell.col;
@@ -377,7 +527,7 @@ export function DragProvider({
           });
 
           // Stack visibility management
-          const allPanels = getWorkingAllPanels();
+          const allPanels = baseAllPanels;
           const sourceCellKey = `cell-${fromRow}-${fromCol}`;
           const destCellKey = `cell-${toRow}-${toCol}`;
 
@@ -402,35 +552,142 @@ export function DragProvider({
     // CONTAINER → PANEL
     // ============================================================
     if (payload?.type === DragType.CONTAINER && panelId) {
-      const all = getWorkingAllPanels();
+      // Use baseAllPanels (original state) NOT draftPanels (preview state)
+      const all = baseAllPanels;
       const fromPanel = all.find((p) => p.id === payload.context?.panelId);
       const toPanel = all.find((p) => p.id === panelId);
 
-      if (fromPanel && toPanel && fromPanel.id !== toPanel.id) {
-        LayoutHelpers.moveContainerBetweenPanels({
-          dispatch, socket, fromPanel, toPanel,
-          containerId: payload.id,
-          toIndex: null,
-          emit: true,
-        });
+      if (fromPanel && toPanel) {
+        let toIndex = null;
+
+        // Check for explicit insertion index (e.g., panel header drop = 0)
+        if (dropTarget.context?.insertAt !== undefined) {
+          toIndex = dropTarget.context.insertAt;
+        } else if (containerId) {
+          // Dropping over a specific container - calculate insertion based on edge
+          const containerList = toPanel.containers || [];
+          const hoveredIndex = containerList.indexOf(containerId);
+
+          if (hoveredIndex !== -1) {
+            const edge = dropTarget.context?.closestEdge;
+
+            if (edge === 'top' || edge === 'left') {
+              toIndex = hoveredIndex;  // Insert before
+            } else if (edge === 'bottom' || edge === 'right') {
+              toIndex = hoveredIndex + 1;  // Insert after
+            }
+
+            // Adjust index if moving within same panel
+            if (fromPanel.id === toPanel.id) {
+              const fromIndex = containerList.indexOf(payload.id);
+              if (fromIndex !== -1 && fromIndex < hoveredIndex) {
+                toIndex = Math.max(0, toIndex - 1);
+              }
+            }
+          }
+        }
+        // else: toIndex stays null, which means append to end
+
+        // Execute the move
+        if (fromPanel.id === toPanel.id) {
+          // Same panel - use reorder helper
+          const containerList = fromPanel.containers || [];
+          const fromIndex = containerList.indexOf(payload.id);
+
+          if (fromIndex !== -1) {
+            // If toIndex is null, append to end
+            const finalToIndex = toIndex !== null ? toIndex : containerList.length;
+
+            if (fromIndex !== finalToIndex) {
+              LayoutHelpers.reorderContainersInPanel({
+                dispatch, socket, panel: fromPanel,
+                fromIndex,
+                toIndex: finalToIndex,
+                emit: true,
+              });
+            }
+          }
+        } else {
+          // Cross-panel move
+          LayoutHelpers.moveContainerBetweenPanels({
+            dispatch, socket, fromPanel, toPanel,
+            containerId: payload.id,
+            toIndex,  // null = append to end
+            emit: true,
+          });
+        }
       }
     }
 
     // ============================================================
-    // INSTANCE → CONTAINER
+    // INSTANCE → CONTAINER (COPY BEHAVIOR)
     // ============================================================
     if (payload?.type === DragType.INSTANCE && containerId) {
-      const fromC = getWorkingContainers().find((c) => c.id === payload.context?.containerId);
-      const toC = getWorkingContainers().find((c) => c.id === containerId);
+      // Skip if this is a cross-window drop - let CROSS-WINDOW handler deal with it
+      if (dropTarget.dataTransfer) {
+        const parsed = parseExternalDrop(dropTarget.dataTransfer);
+        if (parsed.isCrossWindow) {
+          clearSession();
+          return;
+        }
+      }
+
+      // Use baseContainers (original state) NOT draftContainers (preview state)
+      const fromC = baseContainers.find((c) => c.id === payload.context?.containerId);
+      const toC = baseContainers.find((c) => c.id === containerId);
 
       if (fromC && toC) {
-        const toIndex = instanceId && toC ? (toC.items || []).indexOf(instanceId) : null;
-        LayoutHelpers.moveInstanceBetweenContainers({
-          dispatch, socket, fromContainer: fromC, toContainer: toC,
-          instanceId: payload.id,
-          toIndex,
-          emit: true,
-        });
+        let toIndex = null;
+
+        // Check if drop target specifies explicit insertion index (e.g., header drop = 0)
+        if (dropTarget.context?.insertAt !== undefined) {
+          toIndex = dropTarget.context.insertAt;
+        } else if (instanceId && toC) {
+          const items = toC.items || [];
+          const hoveredIndex = items.indexOf(instanceId);
+
+          if (hoveredIndex !== -1) {
+            // Extract edge from drop target context
+            const edge = dropTarget.context?.closestEdge;
+
+            // Determine insertion position based on edge
+            if (edge === 'top' || edge === 'left') {
+              toIndex = hoveredIndex;  // Insert before
+            } else if (edge === 'bottom' || edge === 'right') {
+              toIndex = hoveredIndex + 1;  // Insert after
+            } else {
+              toIndex = hoveredIndex;
+            }
+
+            // For same-container drops, adjust for removal of source item ONLY if using MOVE behavior
+            // Currently using COPY behavior, so no adjustment needed
+            // if (fromC.id === toC.id) {
+            //   const fromIndex = items.indexOf(payload.id);
+            //   if (fromIndex !== -1 && fromIndex < toIndex) {
+            //     toIndex = Math.max(0, toIndex - 1);
+            //   }
+            // }
+          }
+        }
+
+        // COPY BEHAVIOR: Always create a new instance with the same label
+        // Get the original instance to copy its label
+        const originalInstance = baseContainers
+          .flatMap(c => c.items || [])
+          .map(id => state.instances?.find(inst => inst.id === id))
+          .find(inst => inst?.id === payload.id);
+
+        if (originalInstance) {
+          const newId = makeUUID();
+          LayoutHelpers.createInstanceInContainer({
+            dispatch,
+            socket,
+            containerId: toC.id,
+            instance: { id: newId, label: originalInstance.label },
+            index: toIndex,
+            emit: true,
+          });
+        }
       }
     }
 
@@ -439,7 +696,7 @@ export function DragProvider({
     // ============================================================
     if ([DragType.FILE, DragType.TEXT, DragType.URL, DragType.EXTERNAL].includes(payload?.type)) {
       const targetContainerId = containerId ||
-        (panelId ? getWorkingAllPanels().find((p) => p.id === panelId)?.containers?.[0] : null);
+        (panelId ? baseAllPanels.find((p) => p.id === panelId)?.containers?.[0] : null);
 
       if (targetContainerId) {
         let label = "Untitled";
@@ -448,9 +705,11 @@ export function DragProvider({
         else if (payload.type === DragType.URL) label = payload.data?.url || "Link";
 
         const id = makeUUID();
+        const toIndex = dropTarget.context?.insertAt ?? null;
         LayoutHelpers.createInstanceInContainer({
           dispatch, socket, containerId: targetContainerId,
           instance: { id, label },
+          index: toIndex,
           emit: true,
         });
       }
@@ -461,15 +720,18 @@ export function DragProvider({
     // ============================================================
     if (dropTarget.dataTransfer) {
       const parsed = parseExternalDrop(dropTarget.dataTransfer);
+
       if (parsed.isCrossWindow && parsed.data?.meta?.label) {
         const targetContainerId = containerId ||
-          (panelId ? getWorkingAllPanels().find((p) => p.id === panelId)?.containers?.[0] : null);
+          (panelId ? baseAllPanels.find((p) => p.id === panelId)?.containers?.[0] : null);
 
         if (targetContainerId) {
           const id = makeUUID();
+          const toIndex = dropTarget.context?.insertAt ?? null;
           LayoutHelpers.createInstanceInContainer({
             dispatch, socket, containerId: targetContainerId,
             instance: { id, label: parsed.data.meta.label },
+            index: toIndex,
             emit: true,
           });
         }
@@ -477,66 +739,26 @@ export function DragProvider({
     }
 
     clearSession();
-  }, [dispatch, socket, getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, getWorkingAllPanels, getWorkingContainers, clearSession]);
+  }, [dispatch, socket, getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, baseAllPanels, baseContainers, clearSession, state]);
 
   const handleDragEnd = useCallback(() => {
     clearSession();
   }, [clearSession]);
 
   // ============================================================
-  // EXTERNAL DRAG DETECTION (grid-level)
+  // EXTERNAL DRAG DETECTION - Removed (handled by Pragmatic)
+  // ============================================================
+  // Native grid listeners removed - Pragmatic Drag and Drop handles all events
+  // External drags (files/text/URLs) are now handled through Pragmatic's
+  // dropTargetForElements with dataTransfer passed through nativeEvent
+
+  // ============================================================
+  // AUTO SCROLL SETUP (Pragmatic Drag and Drop)
   // ============================================================
   useEffect(() => {
-    const el = gridRef?.current;
-    if (!el) return;
-
-    const onDragOver = (e) => {
-      e.preventDefault();
-      const s = sessionRef.current;
-
-      if (!s.dragging) {
-        const payload = { type: DragType.EXTERNAL, id: "__external__", data: {}, context: {} };
-        handleDragStart(payload, e.clientX, e.clientY);
-      } else {
-        handleDragMove(e.clientX, e.clientY);
-      }
-    };
-
-    const onDrop = (e) => {
-      e.preventDefault();
-      const s = sessionRef.current;
-
-      if (s.dragging && s.payload?.type === DragType.EXTERNAL) {
-        const parsed = parseExternalDrop(e.dataTransfer);
-        s.payload = { ...s.payload, ...parsed };
-      }
-
-      handleDrop({
-        type: "grid",
-        id: "grid",
-        context: {},
-        clientX: e.clientX,
-        clientY: e.clientY,
-        dataTransfer: e.dataTransfer,
-      });
-    };
-
-    const onDragLeave = (e) => {
-      const rect = el.getBoundingClientRect();
-      const outside = e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom;
-      if (outside) handleDragEnd();
-    };
-
-    el.addEventListener("dragover", onDragOver);
-    el.addEventListener("drop", onDrop);
-    el.addEventListener("dragleave", onDragLeave);
-
-    return () => {
-      el.removeEventListener("dragover", onDragOver);
-      el.removeEventListener("drop", onDrop);
-      el.removeEventListener("dragleave", onDragLeave);
-    };
-  }, [gridRef, handleDragStart, handleDragMove, handleDrop, handleDragEnd]);
+    const cleanup = setupAutoScroll();
+    return cleanup;
+  }, []);
 
   // ============================================================
   // STACK HELPERS
