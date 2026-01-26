@@ -51,7 +51,7 @@ export const DropAccepts = {
   GRID_CELL: [DragType.PANEL],
   PANEL_CONTENT: [DragType.CONTAINER, DragType.INSTANCE, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
   CONTAINER_LIST: [DragType.INSTANCE, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
-  INSTANCE: [DragType.INSTANCE],
+  INSTANCE: [DragType.INSTANCE, DragType.FILE, DragType.TEXT, DragType.URL], // Accept files/text/URLs for positional insertion
 };
 
 // ============================================================
@@ -99,6 +99,7 @@ export function serializePayload(payload) {
     type: payload.type,
     id: payload.id,
     context: payload.context,
+    data: payload.data, // Include full data object for complete copying
     meta: { label: payload.data?.label || payload.data?.name || "" },
     sourceWindowId: payload.sourceWindowId,
   });
@@ -125,9 +126,10 @@ export function parseExternalDrop(source) {
       return {
         type: parsed.type,
         id: parsed.id,
-        data: parsed,
+        data: parsed.data, // Extract the actual data object, not the entire wrapper
         context: parsed.context || {},
         isCrossWindow: parsed.sourceWindowId !== getWindowId(),
+        meta: parsed.meta, // Also pass through meta
       };
     } catch { /* fall through */ }
   }
@@ -517,24 +519,43 @@ export function useDragDrop({
       dropTargetForExternal({
         element: el,
         canDrop: () => canAcceptExternal(),
-        getData: () => ({ type, id, context }),
-        onDragEnter: () => {
+        getData: ({ input, element }) => {
+          const data = { type, id, context, instanceId: id };
+          // Attach closest edge for drop indicator (same as internal drops)
+          return attachClosestEdge(data, {
+            input,
+            element,
+            allowedEdges,
+          });
+        },
+        onDragEnter: ({ self }) => {
           if (canAcceptExternal()) {
             setIsOver(true);
+            // Extract and set closest edge for drop indicators
+            const edge = extractClosestEdge(self.data);
+            setClosestEdge(edge);
           }
         },
-        onDrag: ({ location }) => {
+        onDrag: ({ location, self }) => {
           const clientX = location.current.input.clientX;
           const clientY = location.current.input.clientY;
+          // Update closest edge on drag
+          const edge = extractClosestEdge(self.data);
+          setClosestEdge(edge);
           dragCtx.handleDragOver?.({ type, id, context, clientX, clientY });
         },
         onDragLeave: () => {
           setIsOver(false);
+          setClosestEdge(null);
         },
-        onDrop: ({ location, source }) => {
+        onDrop: ({ location, source, self }) => {
           setIsOver(false);
+          setClosestEdge(null);
           const clientX = location.current.input.clientX;
           const clientY = location.current.input.clientY;
+
+          // Extract closestEdge from drop target data
+          const edge = extractClosestEdge(self.data);
 
           // Parse external drop data
           const parsed = parseExternalDrop(source);
@@ -542,7 +563,7 @@ export function useDragDrop({
           dragCtx.handleDrop({
             type,
             id,
-            context,
+            context: { ...context, instanceId: id, closestEdge: edge },
             clientX,
             clientY,
             source: {

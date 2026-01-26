@@ -272,6 +272,51 @@ function GridInner({ components }) {
     return (state.panels || []).filter((p) => p.gridId === gridId);
   }, [state.panels, gridId]);
 
+  // Defensive: Ensure at least one panel per cell is visible
+  useEffect(() => {
+    if (!visiblePanels || visiblePanels.length === 0) return;
+
+    // Group panels by cell
+    const cellMap = new Map();
+    for (const panel of visiblePanels) {
+      const key = `${panel.row}-${panel.col}`;
+      if (!cellMap.has(key)) {
+        cellMap.set(key, []);
+      }
+      cellMap.get(key).push(panel);
+    }
+
+    // Check each cell - if all panels are hidden, show the first one
+    for (const [cellKey, panels] of cellMap) {
+      if (panels.length === 0) continue;
+
+      const allHidden = panels.every(p => {
+        const display = p?.layout?.style?.display ?? "block";
+        return display === "none";
+      });
+
+      if (allHidden) {
+        // Fix: Show the first panel in this cell
+        const firstPanel = panels[0];
+        CommitHelpers.updatePanel({
+          dispatch,
+          socket,
+          panel: {
+            ...firstPanel,
+            layout: {
+              ...(firstPanel.layout || {}),
+              style: {
+                ...(firstPanel.layout?.style || {}),
+                display: "block",
+              },
+            },
+          },
+          emit: true,
+        });
+      }
+    }
+  }, [visiblePanels, dispatch, socket]);
+
   const [fullscreenPanelId, setFullscreenPanelId] = useState(null);
 
   // Grid sizing

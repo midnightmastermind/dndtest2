@@ -470,6 +470,11 @@ export function DragProvider({
       return;
     }
 
+    // Update pointer position from drop event if available
+    if (dropTarget.clientX !== undefined && dropTarget.clientY !== undefined) {
+      pointerRef.current = { x: dropTarget.clientX, y: dropTarget.clientY };
+    }
+
     const { x, y } = pointerRef.current;
 
     // Resolve targets from hit testing + drop target context
@@ -502,6 +507,13 @@ export function DragProvider({
     // PANEL → CELL
     // ============================================================
     if (payload?.type === DragType.PANEL) {
+      // Check if this is a cross-window drop
+      let isCrossWindow = false;
+      if (dropTarget.dataTransfer) {
+        const parsed = parseExternalDrop(dropTarget.dataTransfer);
+        isCrossWindow = parsed.isCrossWindow;
+      }
+
       // Use grid cell context if available (from grid-cell drop zone), otherwise fall back to getCellFromPoint
       let cell = null;
       if (dropTarget.type === "grid-cell" && dropTarget.context?.row !== undefined && dropTarget.context?.col !== undefined) {
@@ -514,15 +526,80 @@ export function DragProvider({
         cell = getCellFromPoint(x, y);
       }
 
-      if (cell) {
+      if (cell && isCrossWindow) {
+        // Create a copy of the panel with all its containers and instances
+        const sourcePanel = payload.data;
+        const newPanelId = makeUUID();
+        const newContainerIds = [];
+
+        // Copy all containers and their instances
+        const sourceContainers = sourcePanel?.containerObjects || [];
+        sourceContainers.forEach(sourceContainer => {
+          const newContainerId = makeUUID();
+          newContainerIds.push(newContainerId);
+
+          // Copy instances for this container
+          const sourceInstances = sourceContainer?.instanceObjects || [];
+          const newInstanceIds = [];
+
+          sourceInstances.forEach(sourceInstance => {
+            const newInstanceId = makeUUID();
+            newInstanceIds.push(newInstanceId);
+            const newInstance = {
+              id: newInstanceId,
+              label: sourceInstance.label || "Instance",
+            };
+            CommitHelpers.createInstance({ dispatch, socket, instance: newInstance, emit: true });
+          });
+
+          // Create the container with copied instances
+          const newContainer = {
+            id: newContainerId,
+            label: sourceContainer.label || "Container",
+            items: newInstanceIds,
+          };
+          CommitHelpers.createContainer({ dispatch, socket, container: newContainer, emit: true });
+        });
+
+        // Create the panel with copied containers
+        const newPanel = {
+          id: newPanelId,
+          row: cell.row,
+          col: cell.col,
+          width: sourcePanel?.width || 1,
+          height: sourcePanel?.height || 1,
+          containers: newContainerIds,
+          layout: sourcePanel?.layout || {},
+        };
+        CommitHelpers.createPanel({ dispatch, socket, panel: newPanel, emit: true });
+
+        // Handle stack visibility for destination cell
+        const destStack = baseAllPanels.filter((p) => p.row === cell.row && p.col === cell.col);
+        destStack.forEach((p) => {
+          LayoutHelpers.setPanelStackDisplay({ dispatch, socket, panel: p, display: "none", emit: true });
+        });
+      } else if (cell) {
         const panel = baseAllPanels.find((p) => p.id === payload.id);
         if (panel && (panel.row !== cell.row || panel.col !== cell.col)) {
           const fromRow = panel.row, fromCol = panel.col;
           const toRow = cell.row, toCol = cell.col;
 
+          // Move panel and ensure it's visible in new position
+          const movedPanel = {
+            ...panel,
+            row: toRow,
+            col: toCol,
+            layout: {
+              ...(panel.layout || {}),
+              style: {
+                ...(panel.layout?.style || {}),
+                display: "block",
+              },
+            },
+          };
           CommitHelpers.updatePanel({
             dispatch, socket,
-            panel: { ...panel, row: toRow, col: toCol },
+            panel: movedPanel,
             emit: true,
           });
 
@@ -534,13 +611,18 @@ export function DragProvider({
           const sourceStack = allPanels.filter((p) => p.id !== payload.id && cellKeyFromPanel(p) === sourceCellKey);
           const destStack = allPanels.filter((p) => p.id !== payload.id && cellKeyFromPanel(p) === destCellKey);
 
-          if (sourceStack.length) {
+          if (sourceStack.length > 0 && sourceStack[0]) {
+            // Show the first remaining panel in the source stack
             LayoutHelpers.setPanelStackDisplay({ dispatch, socket, panel: sourceStack[0], display: "block", emit: true });
+            // Hide all other panels in the source stack
             sourceStack.slice(1).forEach((p) => {
-              LayoutHelpers.setPanelStackDisplay({ dispatch, socket, panel: p, display: "none", emit: true });
+              if (p) {
+                LayoutHelpers.setPanelStackDisplay({ dispatch, socket, panel: p, display: "none", emit: true });
+              }
             });
           }
 
+          // Hide all panels in the destination stack (the moved panel will be on top)
           destStack.forEach((p) => {
             LayoutHelpers.setPanelStackDisplay({ dispatch, socket, panel: p, display: "none", emit: true });
           });
@@ -552,69 +634,137 @@ export function DragProvider({
     // CONTAINER → PANEL
     // ============================================================
     if (payload?.type === DragType.CONTAINER && panelId) {
-      // Use baseAllPanels (original state) NOT draftPanels (preview state)
-      const all = baseAllPanels;
-      const fromPanel = all.find((p) => p.id === payload.context?.panelId);
-      const toPanel = all.find((p) => p.id === panelId);
+      // Check if this is a cross-window drop - if so, create a copy instead of moving
+      let isCrossWindow = false;
+      if (dropTarget.dataTransfer) {
+        const parsed = parseExternalDrop(dropTarget.dataTransfer);
+        isCrossWindow = parsed.isCrossWindow;
+      }
 
-      if (fromPanel && toPanel) {
+      if (isCrossWindow) {
+        // Create a copy of the container in the target panel with all its instances
+        const sourceContainer = payload.data;
+        const newContainerId = makeUUID();
+
+        // Copy all instances from the source container
+        const sourceInstanceObjects = sourceContainer?.instanceObjects || [];
+        const newInstanceIds = [];
+
+        // Create new instances
+        sourceInstanceObjects.forEach(sourceInstance => {
+          const newInstanceId = makeUUID();
+          newInstanceIds.push(newInstanceId);
+          const newInstance = {
+            id: newInstanceId,
+            label: sourceInstance.label || "Instance",
+          };
+          CommitHelpers.createInstance({ dispatch, socket, instance: newInstance, emit: true });
+        });
+
+        const newContainer = {
+          id: newContainerId,
+          label: sourceContainer?.label || "Container",
+          items: newInstanceIds,
+        };
+
+        // Calculate insertion index
         let toIndex = null;
-
-        // Check for explicit insertion index (e.g., panel header drop = 0)
         if (dropTarget.context?.insertAt !== undefined) {
           toIndex = dropTarget.context.insertAt;
         } else if (containerId) {
-          // Dropping over a specific container - calculate insertion based on edge
-          const containerList = toPanel.containers || [];
-          const hoveredIndex = containerList.indexOf(containerId);
-
-          if (hoveredIndex !== -1) {
-            const edge = dropTarget.context?.closestEdge;
-
-            if (edge === 'top' || edge === 'left') {
-              toIndex = hoveredIndex;  // Insert before
-            } else if (edge === 'bottom' || edge === 'right') {
-              toIndex = hoveredIndex + 1;  // Insert after
-            }
-
-            // Adjust index if moving within same panel
-            if (fromPanel.id === toPanel.id) {
-              const fromIndex = containerList.indexOf(payload.id);
-              if (fromIndex !== -1 && fromIndex < hoveredIndex) {
-                toIndex = Math.max(0, toIndex - 1);
+          const toPanel = baseAllPanels.find((p) => p.id === panelId);
+          if (toPanel) {
+            const containerList = toPanel.containers || [];
+            const hoveredIndex = containerList.indexOf(containerId);
+            if (hoveredIndex !== -1) {
+              const edge = dropTarget.context?.closestEdge;
+              if (edge === 'top' || edge === 'left') {
+                toIndex = hoveredIndex;
+              } else if (edge === 'bottom' || edge === 'right') {
+                toIndex = hoveredIndex + 1;
               }
             }
           }
         }
-        // else: toIndex stays null, which means append to end
 
-        // Execute the move
-        if (fromPanel.id === toPanel.id) {
-          // Same panel - use reorder helper
-          const containerList = fromPanel.containers || [];
-          const fromIndex = containerList.indexOf(payload.id);
-
-          if (fromIndex !== -1) {
-            // If toIndex is null, append to end
-            const finalToIndex = toIndex !== null ? toIndex : containerList.length;
-
-            if (fromIndex !== finalToIndex) {
-              LayoutHelpers.reorderContainersInPanel({
-                dispatch, socket, panel: fromPanel,
-                fromIndex,
-                toIndex: finalToIndex,
-                emit: true,
-              });
-            }
-          }
-        } else {
-          // Cross-panel move
-          LayoutHelpers.moveContainerBetweenPanels({
-            dispatch, socket, fromPanel, toPanel,
-            containerId: payload.id,
-            toIndex,  // null = append to end
+        // Create the container and add it to the panel
+        CommitHelpers.createContainer({ dispatch, socket, container: newContainer, emit: true });
+        const targetPanel = baseAllPanels.find((p) => p.id === panelId);
+        if (targetPanel) {
+          LayoutHelpers.addContainerToPanel({
+            dispatch, socket,
+            panel: targetPanel,
+            containerId: newContainerId,
+            index: toIndex,
             emit: true,
           });
+        }
+      } else {
+        // Same-window drop - use move behavior
+        // Use baseAllPanels (original state) NOT draftPanels (preview state)
+        const all = baseAllPanels;
+        const fromPanel = all.find((p) => p.id === payload.context?.panelId);
+        const toPanel = all.find((p) => p.id === panelId);
+
+        if (fromPanel && toPanel) {
+          let toIndex = null;
+
+          // Check for explicit insertion index (e.g., panel header drop = 0)
+          if (dropTarget.context?.insertAt !== undefined) {
+            toIndex = dropTarget.context.insertAt;
+          } else if (containerId) {
+            // Dropping over a specific container - calculate insertion based on edge
+            const containerList = toPanel.containers || [];
+            const hoveredIndex = containerList.indexOf(containerId);
+
+            if (hoveredIndex !== -1) {
+              const edge = dropTarget.context?.closestEdge;
+
+              if (edge === 'top' || edge === 'left') {
+                toIndex = hoveredIndex;  // Insert before
+              } else if (edge === 'bottom' || edge === 'right') {
+                toIndex = hoveredIndex + 1;  // Insert after
+              }
+
+              // Adjust index if moving within same panel
+              if (fromPanel.id === toPanel.id) {
+                const fromIndex = containerList.indexOf(payload.id);
+                if (fromIndex !== -1 && fromIndex < hoveredIndex) {
+                  toIndex = Math.max(0, toIndex - 1);
+                }
+              }
+            }
+          }
+          // else: toIndex stays null, which means append to end
+
+          // Execute the move
+          if (fromPanel.id === toPanel.id) {
+            // Same panel - use reorder helper
+            const containerList = fromPanel.containers || [];
+            const fromIndex = containerList.indexOf(payload.id);
+
+            if (fromIndex !== -1) {
+              // If toIndex is null, append to end
+              const finalToIndex = toIndex !== null ? toIndex : containerList.length;
+
+              if (fromIndex !== finalToIndex) {
+                LayoutHelpers.reorderContainersInPanel({
+                  dispatch, socket, panel: fromPanel,
+                  fromIndex,
+                  toIndex: finalToIndex,
+                  emit: true,
+                });
+              }
+            }
+          } else {
+            // Cross-panel move
+            LayoutHelpers.moveContainerBetweenPanels({
+              dispatch, socket, fromPanel, toPanel,
+              containerId: payload.id,
+              toIndex,  // null = append to end
+              emit: true,
+            });
+          }
         }
       }
     }
@@ -627,7 +777,7 @@ export function DragProvider({
       if (dropTarget.dataTransfer) {
         const parsed = parseExternalDrop(dropTarget.dataTransfer);
         if (parsed.isCrossWindow) {
-          clearSession();
+          // Let CROSS-WINDOW handler process this - don't clear session yet
           return;
         }
       }
@@ -712,7 +862,66 @@ export function DragProvider({
       else if (payload.type === DragType.URL) label = payload.data?.url || "Link";
 
       const id = makeUUID();
-      const toIndex = dropTarget.context?.insertAt ?? null;
+      let toIndex = dropTarget.context?.insertAt ?? null;
+
+      console.log('[EXTERNAL DROP] Starting calculation:', { x, y, containerId, insertAt: dropTarget.context?.insertAt });
+
+      // Always find nearest instance based on cursor position (more reliable than hover detection)
+      if (toIndex === null) {
+        const container = baseContainers.find((c) => c.id === containerId);
+        if (container) {
+          const items = container.items || [];
+          console.log('[EXTERNAL DROP] Found container with items:', items);
+
+          if (items.length > 0) {
+            let nearestIndex = 0;
+            let nearestDistance = Infinity;
+
+            // Find the nearest instance based on cursor position
+            items.forEach((itemId, index) => {
+              const el = document.querySelector(`[data-instance-id="${itemId}"]`);
+              if (el) {
+                const rect = el.getBoundingClientRect();
+                const centerY = rect.top + rect.height / 2;
+                const distance = Math.abs(y - centerY);
+
+                console.log(`[EXTERNAL DROP] Instance ${index} (${itemId}):`, {
+                  top: rect.top,
+                  bottom: rect.bottom,
+                  centerY,
+                  cursorY: y,
+                  distance
+                });
+
+                if (distance < nearestDistance) {
+                  nearestDistance = distance;
+                  nearestIndex = index;
+                }
+              }
+            });
+
+            console.log('[EXTERNAL DROP] Nearest instance:', { nearestIndex, nearestDistance });
+
+            // Determine if cursor is above or below the nearest instance
+            const nearestEl = document.querySelector(`[data-instance-id="${items[nearestIndex]}"]`);
+            if (nearestEl) {
+              const rect = nearestEl.getBoundingClientRect();
+              const centerY = rect.top + rect.height / 2;
+
+              if (y < centerY) {
+                toIndex = nearestIndex;  // Insert before
+                console.log('[EXTERNAL DROP] Cursor above center, inserting before:', toIndex);
+              } else {
+                toIndex = nearestIndex + 1;  // Insert after
+                console.log('[EXTERNAL DROP] Cursor below center, inserting after:', toIndex);
+              }
+            }
+          }
+        }
+      }
+
+      console.log('[EXTERNAL DROP] Final toIndex:', toIndex);
+
       LayoutHelpers.createInstanceInContainer({
         dispatch, socket, containerId,
         instance: { id, label },
@@ -727,12 +936,69 @@ export function DragProvider({
     if (dropTarget.dataTransfer && containerId) {
       const parsed = parseExternalDrop(dropTarget.dataTransfer);
 
-      if (parsed.isCrossWindow && parsed.data?.meta?.label) {
+      // Handle cross-window instance drops
+      if (parsed.isCrossWindow && parsed.type === DragType.INSTANCE) {
         const id = makeUUID();
-        const toIndex = dropTarget.context?.insertAt ?? null;
+        let toIndex = dropTarget.context?.insertAt ?? null;
+
+        console.log('[CROSS-WINDOW DROP] Starting calculation:', { x, y, containerId, insertAt: dropTarget.context?.insertAt });
+
+        // Always find nearest instance based on cursor position (more reliable than hover detection)
+        if (toIndex === null) {
+          const container = baseContainers.find((c) => c.id === containerId);
+          if (container) {
+            const items = container.items || [];
+            console.log('[CROSS-WINDOW DROP] Found container with items:', items);
+
+            if (items.length > 0) {
+              let nearestIndex = 0;
+              let nearestDistance = Infinity;
+
+              // Find the nearest instance based on cursor position
+              items.forEach((itemId, index) => {
+                const el = document.querySelector(`[data-instance-id="${itemId}"]`);
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  const centerY = rect.top + rect.height / 2;
+                  const distance = Math.abs(y - centerY);
+
+                  console.log(`[CROSS-WINDOW DROP] Instance ${index} (${itemId}):`, {
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    centerY,
+                    cursorY: y,
+                    distance
+                  });
+
+                  if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestIndex = index;
+                  }
+                }
+              });
+
+              console.log('[CROSS-WINDOW DROP] Nearest instance:', { nearestIndex, nearestDistance });
+
+              // Determine if cursor is above or below the nearest instance
+              const nearestEl = document.querySelector(`[data-instance-id="${items[nearestIndex]}"]`);
+              if (nearestEl) {
+                const rect = nearestEl.getBoundingClientRect();
+                const centerY = rect.top + rect.height / 2;
+
+                if (y < centerY) {
+                  toIndex = nearestIndex;  // Insert before
+                } else {
+                  toIndex = nearestIndex + 1;  // Insert after
+                }
+              }
+            }
+          }
+        }
+
+        const label = parsed.meta?.label || parsed.data?.label || "Untitled";
         LayoutHelpers.createInstanceInContainer({
           dispatch, socket, containerId,
-          instance: { id, label: parsed.data.meta.label },
+          instance: { id, label },
           index: toIndex,
           emit: true,
         });

@@ -158,10 +158,32 @@ function Panel({
   // ============================================================
   const isChildDrag = isContainerDrag || isInstanceDrag || isExternalDrag;
 
+  // Include full container and instance objects for cross-window copying
+  const panelWithChildren = useMemo(() => {
+    const containerObjects = (panel.containers || [])
+      .map(id => {
+        const container = containersById[id];
+        if (!container) return null;
+        // Include instances for each container
+        const instanceObjects = (container.items || [])
+          .map(instId => instancesById[instId])
+          .filter(Boolean);
+        return {
+          ...container,
+          instanceObjects,
+        };
+      })
+      .filter(Boolean);
+    return {
+      ...panel,
+      containerObjects, // Add resolved containers with instances for cross-window copy
+    };
+  }, [panel, containersById, instancesById]);
+
   const { ref: dragRef, isDragging } = useDraggable({
     type: DragType.PANEL,
     id: panel.id,
-    data: panel,
+    data: panelWithChildren,
     context: { panelId: panel.id, cellId: `cell-${panel.row}-${panel.col}` },
     disabled: hidden || isChildDrag,
   });
@@ -327,8 +349,6 @@ function Panel({
           borderBottom: "1px solid var(--border)",
           flex: "0 0 auto",
           position: "relative",
-          background: isHeaderOver ? "rgba(50, 150, 255, 0.1)" : "transparent",
-          transition: "background 0.1s",
         }}
       >
         <GripVertical className="h-4 w-4 text-muted-foreground mr-2" />
@@ -391,7 +411,7 @@ function Panel({
           overflowY: layout.scrollY === "auto" ? "auto" : (layout.scrollY === "scroll" ? "scroll" : "hidden"),
           overflowX: layout.scrollX === "auto" ? "auto" : (layout.scrollX === "scroll" ? "scroll" : "hidden"),
           padding: 0,
-          outline: isOver ? "2px solid rgba(50,150,255,0.5)" : "none",
+          outline: (isOver && isContainerDrag) ? "2px solid rgba(50,150,255,0.5)" : "none",
           outlineOffset: -2,
           position: "relative",
         }}

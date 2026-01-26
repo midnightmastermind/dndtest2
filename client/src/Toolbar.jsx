@@ -69,16 +69,14 @@ const gridOptions = useMemo(
         position: "relative",
         zIndex: 998,
         flex: 1,
-        backgroundColor: "rgb(56, 58, 60)",
+        backgroundColor: "#041225f1",
         borderBottom: "3px solid rgb(143, 150, 158)",
         padding: "1px 5px",
         fontSize: 12,
         fontFamily: "monospace",
         display: "flex",
         width: "100%",
-        marginBottom: "2px",
-        backgroundImage: "url('/banner.jpg')"
-
+        marginBottom: "2px"
       }}
     >
       <div

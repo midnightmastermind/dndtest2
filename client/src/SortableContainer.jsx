@@ -30,12 +30,13 @@ function SortableContainer({
   // CONTEXT
   // ============================================================
   const dragCtx = useDragContext();
-  const { isContainerDrag, isInstanceDrag, isExternalDrag } = dragCtx;
+  const { isContainerDrag, isInstanceDrag, isExternalDrag, isPanelDrag } = dragCtx;
 
   // ============================================================
   // LOCAL STATE
   // ============================================================
   const [draft, setDraft] = useState(() => ({ label: container.label ?? "" }));
+  const [isHoveringBottomSpace, setIsHoveringBottomSpace] = useState(false);
 
   useEffect(() => {
     setDraft({ label: container.label ?? "" });
@@ -66,10 +67,21 @@ function SortableContainer({
   // ============================================================
   // DRAG+DROP: Container is both draggable and accepts other containers for reordering
   // ============================================================
+  // Include full instance objects for cross-window copying
+  const containerWithInstances = useMemo(() => {
+    const instanceObjects = (container.items || [])
+      .map(id => instancesById[id])
+      .filter(Boolean);
+    return {
+      ...container,
+      instanceObjects, // Add resolved instances for cross-window copy
+    };
+  }, [container, instancesById]);
+
   const { ref: containerRef, isDragging, isOver: isContainerOver, closestEdge, props: containerProps } = useDragDrop({
     type: DragType.CONTAINER,
     id: container.id,
-    data: container,
+    data: containerWithInstances,
     context: { panelId, containerId: container.id },
     disabled: isInstanceDrag || isExternalDrag,
     accepts: [DragType.CONTAINER], // Only accept other containers for reordering
@@ -108,7 +120,8 @@ function SortableContainer({
   // ============================================================
   // HIGHLIGHT
   // ============================================================
-  const highlightDrop = (isInstanceDrag || isExternalDrag) && (isHot || isHeaderOver || isListOver);
+  // Show outline only for instance/external drops, not container reordering
+  const highlightDrop = (isHot || isHeaderOver || isListOver) && (isInstanceDrag || isExternalDrag);
 
   // ============================================================
   // RENDER
@@ -126,7 +139,7 @@ function SortableContainer({
         outline: highlightDrop ? "2px solid rgba(50,150,255,0.9)" : "none",
         outlineOffset: 0,
         borderRadius: 10,
-        pointerEvents: isDragging ? "none" : "auto",
+        pointerEvents: (isDragging || isPanelDrag) ? "none" : "auto",
         position: "relative",
         zIndex: isDragging ? 0 : 1,
         opacity: isDragging ? 0.4 : 1,
@@ -204,8 +217,6 @@ function SortableContainer({
           padding: "4px 6px",
           borderBottom: "1px solid var(--border)",
           cursor: (isInstanceDrag || isExternalDrag) ? "default" : "grab",
-          background: isHeaderOver ? "rgba(50, 150, 255, 0.1)" : "transparent",
-          transition: "background 0.1s",
           position: "relative",
         }}
       >
@@ -232,8 +243,8 @@ function SortableContainer({
         </div>
 
         {/* Top drop indicator - when hovering header to insert at top of list */}
-        {/* Only show if container has items */}
-        {isHeaderOver && items.length > 0 && (
+        {/* Only show if container has items and dragging instance/external */}
+        {isHeaderOver && (isInstanceDrag || isExternalDrag) && items.length > 0 && (
           <div
             style={{
               position: "absolute",
@@ -260,8 +271,6 @@ function SortableContainer({
           padding: 0,
           display: "flex",
           flexDirection: "column",
-          background: isListOver ? "rgba(50, 150, 255, 0.05)" : "transparent",
-          transition: "background 0.1s",
           position: "relative",
         }}
       >
@@ -282,6 +291,23 @@ function SortableContainer({
             zIndex: 0,
           }}
         />
+
+        {/* Bottom drop indicator - when hovering empty space at bottom 
+        {isListOver && (isInstanceDrag || isExternalDrag) && items.length > 0 && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 5,
+              left: 9,
+              right: 9,
+              height: 2,
+              backgroundColor: "rgb(50, 150, 255)",
+              borderRadius: 1,
+              zIndex: 10,
+              pointerEvents: "none",
+            }}
+          />
+        )}*/}
 
         <div style={{ position: "relative", zIndex: 1, padding: "5px", flex: 1, display: "flex", flexDirection: "column" }}>
           {items.map((instance) => (
