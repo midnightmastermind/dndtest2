@@ -278,8 +278,9 @@ export function useDroppable({
     };
 
     const canAcceptExternal = () => {
-      // Accept external if accepts includes FILE, TEXT, URL, or EXTERNAL
-      return accepts.includes(DragType.FILE) ||
+      // Accept external if accepts includes INSTANCE (for cross-window), FILE, TEXT, URL, or EXTERNAL
+      return accepts.includes(DragType.INSTANCE) ||
+             accepts.includes(DragType.FILE) ||
              accepts.includes(DragType.TEXT) ||
              accepts.includes(DragType.URL) ||
              accepts.includes(DragType.EXTERNAL);
@@ -408,8 +409,9 @@ export function useDragDrop({
     };
 
     const canAcceptExternal = () => {
-      // Accept external if accepts includes FILE, TEXT, URL, or EXTERNAL
-      return accepts.includes(DragType.FILE) ||
+      // Accept external if accepts includes INSTANCE (for cross-window), FILE, TEXT, URL, or EXTERNAL
+      return accepts.includes(DragType.INSTANCE) ||
+             accepts.includes(DragType.FILE) ||
              accepts.includes(DragType.TEXT) ||
              accepts.includes(DragType.URL) ||
              accepts.includes(DragType.EXTERNAL);

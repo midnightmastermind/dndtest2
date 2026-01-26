@@ -620,7 +620,7 @@ export function DragProvider({
     }
 
     // ============================================================
-    // INSTANCE → CONTAINER (COPY BEHAVIOR)
+    // INSTANCE → CONTAINER (MOVE BEHAVIOR - no duplication in same window)
     // ============================================================
     if (payload?.type === DragType.INSTANCE && containerId) {
       // Skip if this is a cross-window drop - let CROSS-WINDOW handler deal with it
@@ -659,32 +659,43 @@ export function DragProvider({
               toIndex = hoveredIndex;
             }
 
-            // For same-container drops, adjust for removal of source item ONLY if using MOVE behavior
-            // Currently using COPY behavior, so no adjustment needed
-            // if (fromC.id === toC.id) {
-            //   const fromIndex = items.indexOf(payload.id);
-            //   if (fromIndex !== -1 && fromIndex < toIndex) {
-            //     toIndex = Math.max(0, toIndex - 1);
-            //   }
-            // }
+            // For same-container drops, adjust for removal of source item
+            if (fromC.id === toC.id) {
+              const fromIndex = items.indexOf(payload.id);
+              if (fromIndex !== -1 && fromIndex < hoveredIndex) {
+                toIndex = Math.max(0, toIndex - 1);
+              }
+            }
           }
         }
 
-        // COPY BEHAVIOR: Always create a new instance with the same label
-        // Get the original instance to copy its label
-        const originalInstance = baseContainers
-          .flatMap(c => c.items || [])
-          .map(id => state.instances?.find(inst => inst.id === id))
-          .find(inst => inst?.id === payload.id);
-
-        if (originalInstance) {
-          const newId = makeUUID();
-          LayoutHelpers.createInstanceInContainer({
+        // MOVE BEHAVIOR: Move the instance (no duplication in same window)
+        if (fromC.id === toC.id) {
+          // Same container - reorder
+          const items = fromC.items || [];
+          const fromIndex = items.indexOf(payload.id);
+          if (fromIndex !== -1) {
+            const finalToIndex = toIndex !== null ? toIndex : items.length;
+            if (fromIndex !== finalToIndex) {
+              LayoutHelpers.reorderInstancesInContainer({
+                dispatch,
+                socket,
+                container: fromC,
+                fromIndex,
+                toIndex: finalToIndex,
+                emit: true,
+              });
+            }
+          }
+        } else {
+          // Different containers - move
+          LayoutHelpers.moveInstanceBetweenContainers({
             dispatch,
             socket,
-            containerId: toC.id,
-            instance: { id: newId, label: originalInstance.label },
-            index: toIndex,
+            fromContainer: fromC,
+            toContainer: toC,
+            instanceId: payload.id,
+            toIndex,
             emit: true,
           });
         }
@@ -694,47 +705,37 @@ export function DragProvider({
     // ============================================================
     // EXTERNAL (FILE/TEXT/URL) → CONTAINER
     // ============================================================
-    if ([DragType.FILE, DragType.TEXT, DragType.URL, DragType.EXTERNAL].includes(payload?.type)) {
-      const targetContainerId = containerId ||
-        (panelId ? baseAllPanels.find((p) => p.id === panelId)?.containers?.[0] : null);
+    if ([DragType.FILE, DragType.TEXT, DragType.URL, DragType.EXTERNAL].includes(payload?.type) && containerId) {
+      let label = "Untitled";
+      if (payload.type === DragType.FILE) label = payload.data?.name || "File";
+      else if (payload.type === DragType.TEXT) label = (payload.data?.text || "").slice(0, 80) || "Text";
+      else if (payload.type === DragType.URL) label = payload.data?.url || "Link";
 
-      if (targetContainerId) {
-        let label = "Untitled";
-        if (payload.type === DragType.FILE) label = payload.data?.name || "File";
-        else if (payload.type === DragType.TEXT) label = (payload.data?.text || "").slice(0, 80) || "Text";
-        else if (payload.type === DragType.URL) label = payload.data?.url || "Link";
-
-        const id = makeUUID();
-        const toIndex = dropTarget.context?.insertAt ?? null;
-        LayoutHelpers.createInstanceInContainer({
-          dispatch, socket, containerId: targetContainerId,
-          instance: { id, label },
-          index: toIndex,
-          emit: true,
-        });
-      }
+      const id = makeUUID();
+      const toIndex = dropTarget.context?.insertAt ?? null;
+      LayoutHelpers.createInstanceInContainer({
+        dispatch, socket, containerId,
+        instance: { id, label },
+        index: toIndex,
+        emit: true,
+      });
     }
 
     // ============================================================
     // CROSS-WINDOW DROP
     // ============================================================
-    if (dropTarget.dataTransfer) {
+    if (dropTarget.dataTransfer && containerId) {
       const parsed = parseExternalDrop(dropTarget.dataTransfer);
 
       if (parsed.isCrossWindow && parsed.data?.meta?.label) {
-        const targetContainerId = containerId ||
-          (panelId ? baseAllPanels.find((p) => p.id === panelId)?.containers?.[0] : null);
-
-        if (targetContainerId) {
-          const id = makeUUID();
-          const toIndex = dropTarget.context?.insertAt ?? null;
-          LayoutHelpers.createInstanceInContainer({
-            dispatch, socket, containerId: targetContainerId,
-            instance: { id, label: parsed.data.meta.label },
-            index: toIndex,
-            emit: true,
-          });
-        }
+        const id = makeUUID();
+        const toIndex = dropTarget.context?.insertAt ?? null;
+        LayoutHelpers.createInstanceInContainer({
+          dispatch, socket, containerId,
+          instance: { id, label: parsed.data.meta.label },
+          index: toIndex,
+          emit: true,
+        });
       }
     }
 

@@ -60,7 +60,7 @@ const GridCell = React.memo(function GridCell({ r, c, dark, hasPanel }) {
             position: "absolute",
             inset: "6px",
             borderRadius: "8px",
-            background: "rgba(20, 25, 30, 0.4)",
+            background: "rgba(69, 72, 74, 0.4)",
             border: "1px solid rgba(0, 0, 0, 0.5)",
             boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
             pointerEvents: "none",
