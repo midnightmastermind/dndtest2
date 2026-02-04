@@ -249,8 +249,26 @@ function ensureLockDefaults(next) {
   };
 }
 
-export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, panelId }) {
+const ITERATION_MODES = [
+  { value: "inherit", label: "Inherit from Grid" },
+  { value: "own", label: "Use own iteration" },
+];
+
+const TIME_FILTER_OPTIONS = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+];
+
+const DRAG_MODE_OPTIONS = [
+  { value: "move", label: "Move (relocate occurrence)" },
+  { value: "copy", label: "Copy (create new occurrence)" },
+];
+
+export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, panelId, iteration, onIterationChange, defaultDragMode, onDragModeChange }) {
   const v = ensureLockDefaults(value);
+  const iter = iteration || { mode: "inherit", timeFilter: "daily" };
 
   const display = v?.display ?? "grid";
   const flow = v?.flow ?? "row";
@@ -434,6 +452,68 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
             disabled={!lockEnabled}
           />
         </div>
+      </div>
+
+      <Separator />
+
+      {/* Iteration Settings */}
+      <div className="pt-2">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-semibold text-foregroundScale-2">Iteration</h4>
+          <span className="text-[10px] opacity-70">Time-based filtering</span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormInput
+            schema={{
+              type: "select",
+              key: "__iterMode",
+              label: "Mode",
+              options: ITERATION_MODES,
+              description: "Inherit uses the grid's current iteration. Own sets a specific time filter for this panel.",
+            }}
+            value={{ __iterMode: iter.mode || "inherit" }}
+            onChange={(next) => onIterationChange?.({ ...iter, mode: next?.__iterMode || "inherit" })}
+          />
+
+          {iter.mode === "own" && (
+            <FormInput
+              schema={{
+                type: "select",
+                key: "__iterTimeFilter",
+                label: "Time Filter",
+                options: TIME_FILTER_OPTIONS,
+                description: "How occurrences are grouped for this panel.",
+              }}
+              value={{ __iterTimeFilter: iter.timeFilter || "daily" }}
+              onChange={(next) => onIterationChange?.({ ...iter, timeFilter: next?.__iterTimeFilter || "daily" })}
+            />
+          )}
+        </div>
+
+        {iter.mode === "inherit" && (
+          <p className="mt-2 text-[10px] text-foregroundScale-2/80">
+            This panel inherits iteration settings from the grid. Change the grid's iteration to affect this panel's time filtering.
+          </p>
+        )}
+      </div>
+
+      <Separator />
+
+      {/* Drag Behavior */}
+      <div className="pt-2">
+        <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Drag Behavior</h4>
+        <FormInput
+          schema={{
+            type: "select",
+            key: "__defaultDragMode",
+            label: "Default Mode",
+            options: DRAG_MODE_OPTIONS,
+            description: "Default behavior when dragging this panel.",
+          }}
+          value={{ __defaultDragMode: defaultDragMode || "move" }}
+          onChange={(next) => onDragModeChange?.(next?.__defaultDragMode || "move")}
+        />
       </div>
 
       <Separator />

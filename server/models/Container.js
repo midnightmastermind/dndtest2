@@ -8,12 +8,31 @@ const ContainerSchema = new mongoose.Schema(
 
     label: { type: String, required: true, trim: true },
 
-    // Array of Instance ids (strings), in-order
-    items: { type: [String], default: [] },
+    // Grid and panel associations
+    gridId: { type: String },
+    panelId: { type: String },
+
     userId: { type: String, required: true },
 
-    // Optional: if you have users
-    // userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+    // Occurrences in this container (array of occurrence IDs)
+    occurrences: { type: [String], default: [] },
+    kind: { type: String, enum: ["list", "log", "doc", "smart"], default: "list" },
+
+    // Iteration settings (inherit from panel or own)
+    iteration: {
+      mode: { type: String, enum: ["inherit", "own"], default: "inherit" },
+      timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly"], default: "daily" },
+    },
+
+    // Default drag mode for this container
+    defaultDragMode: { type: String, enum: ["move", "copy"], default: "move" },
+
+    // Fields exposed in this container
+    fieldIds: { type: [String], default: [] },
+
+    // Filter and layout options
+    filter: { type: mongoose.Schema.Types.Mixed },
+    layout: { type: mongoose.Schema.Types.Mixed },
   },
   {
     timestamps: true,

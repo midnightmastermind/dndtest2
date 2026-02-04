@@ -94,14 +94,12 @@ function GridRender({
   colSizes,
   rowSizes,
   panelsRender,
-  containersById,
   dispatch,
   socket,
   fullscreenPanelId,
   setFullscreenPanelId,
   addContainerToPanel,
   addInstanceToContainer,
-  instancesById,
   sizesRef,
   onStartColResize,
   onStartRowResize,
@@ -230,10 +228,8 @@ function GridRender({
             cols={cols}
             rows={rows}
             components={components}
-            containersById={containersById}
             addContainerToPanel={addContainerToPanel}
             addInstanceToContainer={addInstanceToContainer}
-            instancesById={instancesById}
             sizesRef={sizesRef}
             fullscreenPanelId={fullscreenPanelId}
             setFullscreenPanelId={setFullscreenPanelId}
@@ -258,7 +254,6 @@ function GridInner({ components }) {
     socket,
     addContainerToPanel,
     addInstanceToContainer,
-    instancesById,
   } = useContext(GridActionsContext);
 
   const grid = state.grid;
@@ -350,12 +345,6 @@ function GridInner({ components }) {
 
   const colTemplate = colSizes.map((s) => `${s}fr`).join(" ");
   const rowTemplate = rowSizes.map((s) => `${s}fr`).join(" ");
-
-  const containersById = useMemo(() => {
-    const m = Object.create(null);
-    for (const c of state.containers || []) m[c.id] = c;
-    return m;
-  }, [state.containers]);
 
   const panelsById = useMemo(() => {
     const m = Object.create(null);
@@ -502,14 +491,12 @@ function GridInner({ components }) {
         colSizes={colSizes}
         rowSizes={rowSizes}
         panelsRender={visiblePanels}
-        containersById={containersById}
         dispatch={dispatch}
         socket={socket}
         fullscreenPanelId={fullscreenPanelId}
         setFullscreenPanelId={setFullscreenPanelId}
         addContainerToPanel={addContainerToPanel}
         addInstanceToContainer={addInstanceToContainer}
-        instancesById={instancesById}
         sizesRef={sizesRef}
         onStartColResize={startColResize}
         onStartRowResize={startRowResize}

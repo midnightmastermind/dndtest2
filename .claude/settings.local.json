@@ -3,7 +3,19 @@
     "allow": [
       "Bash(grep:*)",
       "Bash(npm install)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(git checkout:*)",
+      "Bash(npm start)",
+      "Bash(npm run dev:*)",
+      "Bash(find:*)",
+      "Bash(node scripts/cleanAndMigrate.js:*)",
+      "Bash(/home/joshpoms/.nvm/versions/node/*/bin/node)",
+      "Bash(wsl -d Ubuntu-24.04 bash -c \"cd ~/dndtest2/server && node scripts/cleanAndMigrate.js\")",
+      "Bash(wsl -d Ubuntu-24.04 bash -c:*)",
+      "Bash(wsl -d Ubuntu-24.04 -- bash -lc:*)",
+      "Bash(wsl -d Ubuntu-24.04 -- ~/.nvm/versions/node/v22.21.1/bin/node:*)",
+      "Bash(wsl:*)",
+      "Bash(wsl.exe -d Ubuntu-24.04 -e bash -c:*)"
     ]
   }
 }

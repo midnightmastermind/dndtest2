@@ -7,13 +7,23 @@ const PanelSchema = new mongoose.Schema(
     type: { type: String, default: "" },
     name: { type: String },
 
-    row: { type: Number, default: 0 },
-    col: { type: Number, default: 0 },
-    width: { type: Number, default: 1 },
-    height: { type: Number, default: 1 },
-
     userId: { type: String, required: true },
-    containers: { type: [String], default: [] },
+
+    // Occurrences in this panel (array of occurrence IDs)
+    occurrences: { type: [String], default: [] },
+    kind: { type: String, enum: ["board", "doc", "mixed"], default: "board" },
+
+    // Iteration settings (inherit from grid or own)
+    iteration: {
+      mode: { type: String, enum: ["inherit", "own"], default: "inherit" },
+      timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly"], default: "daily" },
+    },
+
+    // Default drag mode for this panel
+    defaultDragMode: { type: String, enum: ["move", "copy"], default: "move" },
+
+    // Fields exposed in this panel
+    fieldIds: { type: [String], default: [] },
 
     // ✅ keep if you still use it
     styles: { type: [mongoose.Schema.Types.Mixed], default: [] },

@@ -30,6 +30,8 @@ export function masterReducer(state, action) {
                 // server sends these (user-scoped)
                 containers = [],
                 instances = [],
+                occurrences = [],
+                fields = [],
             } = action.payload || {};
 
             return {
@@ -40,6 +42,8 @@ export function masterReducer(state, action) {
                 availableGrids: availableGrids || [],
                 containers: containers || [],
                 instances: instances || [],
+                occurrences: occurrences || [],
+                fields: fields || [],
                 hydrated: true,
             };
         }
@@ -69,6 +73,8 @@ export function masterReducer(state, action) {
                 availableGrids: [],
                 containers: [],
                 instances: [],
+                occurrences: [],
+                fields: [],
                 hydrated: false,
             };
         }
@@ -207,7 +213,7 @@ export function masterReducer(state, action) {
                     {
                         id,
                         label: container.label ?? "Untitled",
-                        items: Array.isArray(container.items) ? container.items : [],
+                        occurrences: Array.isArray(container.occurrences) ? container.occurrences : [],
                     },
                 ],
             };
@@ -228,14 +234,15 @@ export function masterReducer(state, action) {
 
         case ActionTypes.UPDATE_CONTAINER_ITEMS: {
             // bindSocketToStore dispatches { containerId, items }
+            // Note: "items" is backward compat - actually contains occurrence IDs
             const containerId = action.payload?.containerId;
-            const items = action.payload?.items;
+            const items = action.payload?.items; // Actually occurrence IDs
             if (!containerId || !Array.isArray(items)) return state;
 
             return {
                 ...state,
                 containers: (state.containers || []).map((c) =>
-                    c.id === containerId ? { ...c, items: [...items] } : c
+                    c.id === containerId ? { ...c, occurrences: [...items] } : c
                 ),
             };
         }
@@ -260,8 +267,10 @@ export function masterReducer(state, action) {
 
         case ActionTypes.CREATE_INSTANCE_IN_CONTAINER: {
             // payload: { containerId, instance }
-            const { containerId, instance } = action.payload || {};
-            if (!containerId || !instance?.id) return state;
+            // Note: With occurrences, this only creates the instance entity
+            // Container occurrence management happens separately via occurrence actions
+            const { instance } = action.payload || {};
+            if (!instance?.id) return state;
 
             const instanceExists = (state.instances || []).some((i) => i.id === instance.id);
             const nextInstances = instanceExists ? state.instances : [...(state.instances || []), instance];
@@ -269,11 +278,6 @@ export function masterReducer(state, action) {
             return {
                 ...state,
                 instances: nextInstances,
-                containers: (state.containers || []).map((c) => {
-                    if (c.id !== containerId) return c;
-                    if ((c.items || []).includes(instance.id)) return c;
-                    return { ...c, items: [...(c.items || []), instance.id] };
-                }),
             };
         }
 
@@ -307,13 +311,77 @@ export function masterReducer(state, action) {
             const instanceId = action.payload?.instanceId ?? action.payload;
             if (!instanceId) return state;
 
+            // Note: With occurrences, the server handles deleting occurrences
+            // and updating containers. We just delete the instance entity here.
             return {
                 ...state,
                 instances: (state.instances || []).filter((i) => i.id !== instanceId),
-                containers: (state.containers || []).map((c) => ({
-                    ...c,
-                    items: (c.items || []).filter((id) => id !== instanceId),
-                })),
+            };
+        }
+
+        // ======================================================
+        // OCCURRENCES
+        // ======================================================
+        case ActionTypes.SET_OCCURRENCES: {
+            const occurrences = action.payload?.occurrences ?? [];
+            return { ...state, occurrences };
+        }
+
+        case ActionTypes.CREATE_OCCURRENCE:
+        case ActionTypes.UPDATE_OCCURRENCE: {
+            const occurrence = action.payload?.occurrence ?? action.payload;
+            if (!occurrence?.id) return state;
+
+            const exists = (state.occurrences || []).some((o) => o.id === occurrence.id);
+
+            return {
+                ...state,
+                occurrences: exists
+                    ? state.occurrences.map((o) => (o.id === occurrence.id ? { ...o, ...occurrence } : o))
+                    : [...(state.occurrences || []), occurrence],
+            };
+        }
+
+        case ActionTypes.DELETE_OCCURRENCE: {
+            const occurrenceId = action.payload?.occurrenceId ?? action.payload;
+            if (!occurrenceId) return state;
+
+            return {
+                ...state,
+                occurrences: (state.occurrences || []).filter((o) => o.id !== occurrenceId),
+            };
+        }
+
+        // ======================================================
+        // FIELDS
+        // ======================================================
+        case ActionTypes.SET_FIELDS: {
+            const fields = action.payload?.fields ?? [];
+            return { ...state, fields };
+        }
+
+        case ActionTypes.CREATE_FIELD:
+        case ActionTypes.UPDATE_FIELD: {
+            const field = action.payload?.field ?? action.payload;
+            if (!field?.id) return state;
+
+            const exists = (state.fields || []).some((f) => f.id === field.id);
+
+            return {
+                ...state,
+                fields: exists
+                    ? state.fields.map((f) => (f.id === field.id ? { ...f, ...field } : f))
+                    : [...(state.fields || []), field],
+            };
+        }
+
+        case ActionTypes.DELETE_FIELD: {
+            const fieldId = action.payload?.fieldId ?? action.payload;
+            if (!fieldId) return state;
+
+            return {
+                ...state,
+                fields: (state.fields || []).filter((f) => f.id !== fieldId),
             };
         }
 

@@ -449,7 +449,9 @@ export function useDragDrop({
           setIsDragging(true);
           const clientX = location.current.input.clientX;
           const clientY = location.current.input.clientY;
-          dragCtx.handleDragStart(payload, clientX, clientY);
+          // Pass entity's defaultDragMode if available
+          const mode = data?.defaultDragMode || 'move';
+          dragCtx.handleDragStart(payload, clientX, clientY, { mode });
         },
         onDrag: ({ location }) => {
           const clientX = location.current.input.clientX;

@@ -9,12 +9,13 @@ export const GridActionsContext = createContext({
   updatePanel: () => {},
   updateGrid: () => {},
 
-  // helpers / lookups (you pass these)
+  // lookups (you pass these)
   instancesById: Object.create(null),
+  occurrencesById: Object.create(null),
+  containersById: Object.create(null),
+  fieldsById: Object.create(null),
 
   // adders (you pass these)
   addContainerToPanel: () => {},
   addInstanceToContainer: () => {},
-
-
 });

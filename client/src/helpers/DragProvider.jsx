@@ -36,12 +36,12 @@ function deepClonePanels(panels = []) {
   return panels.map((p) => ({
     ...p,
     layout: p.layout ? { ...p.layout, style: { ...(p.layout.style || {}) } } : p.layout,
-    containers: [...(p.containers || [])],
+    occurrences: [...(p.occurrences || [])],
   }));
 }
 
 function deepCloneContainers(containers = []) {
-  return containers.map((c) => ({ ...c, items: [...(c.items || [])] }));
+  return containers.map((c) => ({ ...c, occurrences: [...(c.occurrences || [])] }));
 }
 
 function cellKeyFromPanel(p) {
@@ -78,6 +78,8 @@ export function DragProvider({
   const [activePayload, setActivePayload] = useState(null);
   const [hotTarget, setHotTarget] = useState(null);
   const [panelOverCellId, setPanelOverCellId] = useState(null);
+  // Copy vs Move mode: 'move' = move occurrence, 'copy' = create new occurrence
+  const [dragMode, setDragMode] = useState('move');
 
   const activeType = activePayload?.type || null;
   const activeId = activePayload?.id || null;
@@ -116,6 +118,16 @@ export function DragProvider({
     () => (Array.isArray(state?.containers) ? state.containers : []),
     [state?.containers]
   );
+
+  // Build occurrences lookup for finding occurrence IDs by target
+  const occurrencesById = useMemo(() => {
+    const map = Object.create(null);
+    const occs = Array.isArray(state?.occurrences) ? state.occurrences : [];
+    for (const occ of occs) {
+      if (occ?.id) map[occ.id] = occ;
+    }
+    return map;
+  }, [state?.occurrences]);
 
   // ============================================================
   // DRAFT-AWARE GETTERS
@@ -188,7 +200,7 @@ export function DragProvider({
   // ============================================================
   // SESSION MANAGEMENT
   // ============================================================
-  const startSession = useCallback((payload) => {
+  const startSession = useCallback((payload, mode = 'move') => {
     const s = sessionRef.current;
     if (s.dragging) return;
 
@@ -200,6 +212,7 @@ export function DragProvider({
     s.draftContainers = deepCloneContainers(baseContainers);
 
     setActivePayload(payload);
+    setDragMode(mode); // Set initial drag mode (move or copy)
   }, [basePanels, baseContainers]);
 
   const clearSession = useCallback(() => {
@@ -224,52 +237,63 @@ export function DragProvider({
   // ============================================================
   // PREVIEW MUTATIONS
   // ============================================================
-  const previewMoveInstance = useCallback(({ instanceId, toContainerId, toIndex }) => {
+  // Note: Preview mutations work with occurrence IDs now since containers/panels
+  // store occurrences arrays. During preview, we track the occurrence being moved.
+  const previewMoveInstance = useCallback(({ occurrenceId, toContainerId, toIndex }) => {
     const s = sessionRef.current;
-    if (!s.draftContainers) return;
+    if (!s.draftContainers || !occurrenceId) return;
 
     for (const c of s.draftContainers) {
-      c.items = (c.items || []).filter((id) => id !== instanceId);
+      c.occurrences = (c.occurrences || []).filter((id) => id !== occurrenceId);
     }
 
     const to = s.draftContainers.find((c) => c.id === toContainerId);
     if (!to) return;
 
-    const items = to.items || [];
+    const occurrences = to.occurrences || [];
     if (toIndex != null && toIndex >= 0) {
-      items.splice(toIndex, 0, instanceId);
+      occurrences.splice(toIndex, 0, occurrenceId);
     } else {
-      items.push(instanceId);
+      occurrences.push(occurrenceId);
     }
-    to.items = items;
+    to.occurrences = occurrences;
   }, []);
 
-  const previewMoveContainer = useCallback(({ containerId, toPanelId, toIndex }) => {
+  const previewMoveContainer = useCallback(({ occurrenceId, toPanelId, toIndex }) => {
     const s = sessionRef.current;
-    if (!s.draftPanels) return;
+    if (!s.draftPanels || !occurrenceId) return;
 
     for (const p of s.draftPanels) {
-      p.containers = (p.containers || []).filter((id) => id !== containerId);
+      p.occurrences = (p.occurrences || []).filter((id) => id !== occurrenceId);
     }
 
     const to = s.draftPanels.find((p) => p.id === toPanelId);
     if (!to) return;
 
-    const containers = to.containers || [];
+    const occurrences = to.occurrences || [];
     if (toIndex != null && toIndex >= 0) {
-      containers.splice(toIndex, 0, containerId);
+      occurrences.splice(toIndex, 0, occurrenceId);
     } else {
-      containers.push(containerId);
+      occurrences.push(occurrenceId);
     }
-    to.containers = containers;
+    to.occurrences = occurrences;
   }, []);
 
   // ============================================================
   // DRAG HANDLERS
   // ============================================================
-  const handleDragStart = useCallback((payload, clientX, clientY) => {
+  // Toggle drag mode between copy and move
+  const toggleDragMode = useCallback(() => {
+    setDragMode(prev => prev === 'move' ? 'copy' : 'move');
+  }, []);
+
+  const handleDragStart = useCallback((payload, clientX, clientY, options = {}) => {
     pointerRef.current = { x: clientX, y: clientY };
-    startSession(payload);
+
+    // Determine initial mode from options or default to 'move'
+    // Alt/Option key = copy mode
+    const initialMode = options.mode || 'move';
+    startSession(payload, initialMode);
 
     const cell = getCellFromPoint(clientX, clientY);
     if (payload.type === DragType.PANEL) {
@@ -344,11 +368,23 @@ export function DragProvider({
       // Live preview for instance sorting
       if (s.payload?.type === DragType.INSTANCE && containerId) {
         const toC = s.draftContainers?.find((c) => c.id === containerId);
+        const fromC = s.startContainers?.find((c) => c.id === s.payload.context?.containerId);
         let toIndex = null;
 
-        if (toC && instanceId && instanceId !== s.payload.id) {
-          const items = toC.items || [];
-          const hoveredIndex = items.indexOf(instanceId);
+        // Find the occurrence ID for the dragged instance
+        const draggedOccId = fromC ? LayoutHelpers.findOccurrenceIdByTarget(
+          s.payload.id,
+          fromC.occurrences || [],
+          occurrencesById
+        ) : null;
+
+        if (toC && instanceId && instanceId !== s.payload.id && draggedOccId) {
+          // Find the index of hovered instance in target container
+          const hoveredIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            instanceId,
+            toC.occurrences || [],
+            occurrencesById
+          );
 
           if (hoveredIndex !== -1) {
             // Calculate edge from cursor position
@@ -372,9 +408,12 @@ export function DragProvider({
               }
 
               // Adjust if moving within same container
-              const fromC = s.startContainers?.find((c) => c.id === s.payload.context?.containerId);
               if (fromC && fromC.id === toC.id) {
-                const fromIndex = items.indexOf(s.payload.id);
+                const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+                  s.payload.id,
+                  fromC.occurrences || [],
+                  occurrencesById
+                );
                 if (fromIndex !== -1 && fromIndex < hoveredIndex) {
                   toIndex = Math.max(0, toIndex - 1);
                 }
@@ -383,18 +422,32 @@ export function DragProvider({
           }
         }
 
-        previewMoveInstance({ instanceId: s.payload.id, toContainerId: containerId, toIndex });
+        if (draggedOccId) {
+          previewMoveInstance({ occurrenceId: draggedOccId, toContainerId: containerId, toIndex });
+        }
       }
 
       // Live preview for container sorting
       if (s.payload?.type === DragType.CONTAINER && panelId) {
         const toPanel = s.draftPanels?.find((p) => p.id === panelId);
+        const fromPanel = s.startPanels?.find((p) => p.id === s.payload.context?.panelId);
         const hoveredContainerId = getHoveredContainerId();
         let toIndex = null;
 
-        if (toPanel && hoveredContainerId && hoveredContainerId !== s.payload.id) {
-          const containerList = toPanel.containers || [];
-          const hoveredIndex = containerList.indexOf(hoveredContainerId);
+        // Find the occurrence ID for the dragged container
+        const draggedOccId = fromPanel ? LayoutHelpers.findOccurrenceIdByTarget(
+          s.payload.id,
+          fromPanel.occurrences || [],
+          occurrencesById
+        ) : null;
+
+        if (toPanel && hoveredContainerId && hoveredContainerId !== s.payload.id && draggedOccId) {
+          // Find the index of hovered container in target panel
+          const hoveredIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            hoveredContainerId,
+            toPanel.occurrences || [],
+            occurrencesById
+          );
 
           if (hoveredIndex !== -1) {
             // Calculate edge from cursor position - use 4-directional detection
@@ -425,9 +478,12 @@ export function DragProvider({
               }
 
               // Adjust if moving within same panel
-              const fromPanel = s.startPanels?.find((p) => p.id === s.payload.context?.panelId);
               if (fromPanel && fromPanel.id === toPanel.id) {
-                const fromIndex = containerList.indexOf(s.payload.id);
+                const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+                  s.payload.id,
+                  fromPanel.occurrences || [],
+                  occurrencesById
+                );
                 if (fromIndex !== -1 && fromIndex < hoveredIndex) {
                   toIndex = Math.max(0, toIndex - 1);
                 }
@@ -436,12 +492,14 @@ export function DragProvider({
           }
         }
 
-        previewMoveContainer({ containerId: s.payload.id, toPanelId: panelId, toIndex });
+        if (draggedOccId) {
+          previewMoveContainer({ occurrenceId: draggedOccId, toPanelId: panelId, toIndex });
+        }
       }
 
       onTick?.();
     });
-  }, [getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, previewMoveInstance, previewMoveContainer, onTick]);
+  }, [getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, previewMoveInstance, previewMoveContainer, occurrencesById, onTick]);
 
   const handleDragOver = useCallback((target) => {
     // Called by useDroppable on dragover - can use for finer-grained updates
@@ -644,61 +702,70 @@ export function DragProvider({
       if (isCrossWindow) {
         // Create a copy of the container in the target panel with all its instances
         const sourceContainer = payload.data;
-        const newContainerId = makeUUID();
+        const targetPanel = baseAllPanels.find((p) => p.id === panelId);
+        if (!targetPanel) {
+          clearSession();
+          return;
+        }
 
-        // Copy all instances from the source container
-        const sourceInstanceObjects = sourceContainer?.instanceObjects || [];
-        const newInstanceIds = [];
+        // Get gridId from state
+        const gridId = state?.gridId || state?.grid?._id;
 
-        // Create new instances
-        sourceInstanceObjects.forEach(sourceInstance => {
-          const newInstanceId = makeUUID();
-          newInstanceIds.push(newInstanceId);
-          const newInstance = {
-            id: newInstanceId,
-            label: sourceInstance.label || "Instance",
-          };
-          CommitHelpers.createInstance({ dispatch, socket, instance: newInstance, emit: true });
-        });
-
-        const newContainer = {
-          id: newContainerId,
-          label: sourceContainer?.label || "Container",
-          items: newInstanceIds,
-        };
-
-        // Calculate insertion index
+        // Calculate insertion index using occurrences
         let toIndex = null;
         if (dropTarget.context?.insertAt !== undefined) {
           toIndex = dropTarget.context.insertAt;
         } else if (containerId) {
-          const toPanel = baseAllPanels.find((p) => p.id === panelId);
-          if (toPanel) {
-            const containerList = toPanel.containers || [];
-            const hoveredIndex = containerList.indexOf(containerId);
-            if (hoveredIndex !== -1) {
-              const edge = dropTarget.context?.closestEdge;
-              if (edge === 'top' || edge === 'left') {
-                toIndex = hoveredIndex;
-              } else if (edge === 'bottom' || edge === 'right') {
-                toIndex = hoveredIndex + 1;
-              }
+          const hoveredIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            containerId,
+            targetPanel.occurrences || [],
+            occurrencesById
+          );
+          if (hoveredIndex !== -1) {
+            const edge = dropTarget.context?.closestEdge;
+            if (edge === 'top' || edge === 'left') {
+              toIndex = hoveredIndex;
+            } else if (edge === 'bottom' || edge === 'right') {
+              toIndex = hoveredIndex + 1;
             }
           }
         }
 
-        // Create the container and add it to the panel
-        CommitHelpers.createContainer({ dispatch, socket, container: newContainer, emit: true });
-        const targetPanel = baseAllPanels.find((p) => p.id === panelId);
-        if (targetPanel) {
-          LayoutHelpers.addContainerToPanel({
-            dispatch, socket,
-            panel: targetPanel,
-            containerId: newContainerId,
-            index: toIndex,
+        // Create new container with occurrences (empty initially, instances will be added)
+        const newContainerId = makeUUID();
+        const newContainer = {
+          id: newContainerId,
+          label: sourceContainer?.label || "Container",
+          occurrences: [], // Will be populated as instances are added
+        };
+
+        // Create the container with its occurrence in the panel
+        LayoutHelpers.createContainerInPanel({
+          dispatch, socket, gridId,
+          panel: targetPanel,
+          container: newContainer,
+          index: toIndex,
+          emit: true,
+        });
+
+        // Copy all instances from the source container and add to the new container
+        const sourceInstanceObjects = sourceContainer?.instanceObjects || [];
+        sourceInstanceObjects.forEach(sourceInstance => {
+          const newInstanceId = makeUUID();
+          const newInstance = {
+            id: newInstanceId,
+            label: sourceInstance.label || "Instance",
+          };
+
+          // Need to get the updated container from state - but since this is optimistic,
+          // we can create the instance and occurrence directly
+          LayoutHelpers.createInstanceInContainer({
+            dispatch, socket, gridId,
+            container: { ...newContainer, id: newContainerId },
+            instance: newInstance,
             emit: true,
           });
-        }
+        });
       } else {
         // Same-window drop - use move behavior
         // Use baseAllPanels (original state) NOT draftPanels (preview state)
@@ -707,6 +774,20 @@ export function DragProvider({
         const toPanel = all.find((p) => p.id === panelId);
 
         if (fromPanel && toPanel) {
+          // Find the occurrence ID for the dragged container
+          const draggedContainerId = payload.id;
+          const occurrenceId = LayoutHelpers.findOccurrenceIdByTarget(
+            draggedContainerId,
+            fromPanel.occurrences || [],
+            occurrencesById
+          );
+
+          if (!occurrenceId) {
+            console.warn('[CONTAINER DROP] Could not find occurrence for container:', draggedContainerId);
+            clearSession();
+            return;
+          }
+
           let toIndex = null;
 
           // Check for explicit insertion index (e.g., panel header drop = 0)
@@ -714,8 +795,11 @@ export function DragProvider({
             toIndex = dropTarget.context.insertAt;
           } else if (containerId) {
             // Dropping over a specific container - calculate insertion based on edge
-            const containerList = toPanel.containers || [];
-            const hoveredIndex = containerList.indexOf(containerId);
+            const hoveredIndex = LayoutHelpers.getTargetIndexInOccurrences(
+              containerId,
+              toPanel.occurrences || [],
+              occurrencesById
+            );
 
             if (hoveredIndex !== -1) {
               const edge = dropTarget.context?.closestEdge;
@@ -728,7 +812,11 @@ export function DragProvider({
 
               // Adjust index if moving within same panel
               if (fromPanel.id === toPanel.id) {
-                const fromIndex = containerList.indexOf(payload.id);
+                const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+                  draggedContainerId,
+                  fromPanel.occurrences || [],
+                  occurrencesById
+                );
                 if (fromIndex !== -1 && fromIndex < hoveredIndex) {
                   toIndex = Math.max(0, toIndex - 1);
                 }
@@ -737,15 +825,35 @@ export function DragProvider({
           }
           // else: toIndex stays null, which means append to end
 
-          // Execute the move
-          if (fromPanel.id === toPanel.id) {
-            // Same panel - use reorder helper
-            const containerList = fromPanel.containers || [];
-            const fromIndex = containerList.indexOf(payload.id);
+          // Get gridId for creating new occurrences
+          const gridId = state?.gridId || state?.grid?._id;
+
+          // Check if we're in copy mode
+          const isCopyMode = dragMode === 'copy';
+
+          if (isCopyMode) {
+            // COPY MODE: Create new occurrence for the container in target panel
+            // Source occurrence remains intact
+            LayoutHelpers.copyContainerToPanel({
+              dispatch,
+              socket,
+              gridId,
+              sourceContainerId: draggedContainerId,
+              toPanel,
+              toIndex,
+              emit: true,
+            });
+          } else if (fromPanel.id === toPanel.id) {
+            // MOVE MODE: Same panel - use reorder helper
+            const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+              draggedContainerId,
+              fromPanel.occurrences || [],
+              occurrencesById
+            );
 
             if (fromIndex !== -1) {
               // If toIndex is null, append to end
-              const finalToIndex = toIndex !== null ? toIndex : containerList.length;
+              const finalToIndex = toIndex !== null ? toIndex : (fromPanel.occurrences || []).length;
 
               if (fromIndex !== finalToIndex) {
                 LayoutHelpers.reorderContainersInPanel({
@@ -757,10 +865,10 @@ export function DragProvider({
               }
             }
           } else {
-            // Cross-panel move
+            // MOVE MODE: Cross-panel move (pass occurrence ID, not container ID)
             LayoutHelpers.moveContainerBetweenPanels({
               dispatch, socket, fromPanel, toPanel,
-              containerId: payload.id,
+              occurrenceId,
               toIndex,  // null = append to end
               emit: true,
             });
@@ -787,14 +895,32 @@ export function DragProvider({
       const toC = baseContainers.find((c) => c.id === containerId);
 
       if (fromC && toC) {
+        // Find the occurrence ID for the dragged instance
+        const draggedInstanceId = payload.id;
+        const occurrenceId = LayoutHelpers.findOccurrenceIdByTarget(
+          draggedInstanceId,
+          fromC.occurrences || [],
+          occurrencesById
+        );
+
+        if (!occurrenceId) {
+          console.warn('[INSTANCE DROP] Could not find occurrence for instance:', draggedInstanceId);
+          clearSession();
+          return;
+        }
+
         let toIndex = null;
 
         // Check if drop target specifies explicit insertion index (e.g., header drop = 0)
         if (dropTarget.context?.insertAt !== undefined) {
           toIndex = dropTarget.context.insertAt;
         } else if (instanceId && toC) {
-          const items = toC.items || [];
-          const hoveredIndex = items.indexOf(instanceId);
+          // Find the index of the hovered instance in the target container's occurrences
+          const hoveredIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            instanceId,
+            toC.occurrences || [],
+            occurrencesById
+          );
 
           if (hoveredIndex !== -1) {
             // Extract edge from drop target context
@@ -811,7 +937,11 @@ export function DragProvider({
 
             // For same-container drops, adjust for removal of source item
             if (fromC.id === toC.id) {
-              const fromIndex = items.indexOf(payload.id);
+              const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+                draggedInstanceId,
+                fromC.occurrences || [],
+                occurrencesById
+              );
               if (fromIndex !== -1 && fromIndex < hoveredIndex) {
                 toIndex = Math.max(0, toIndex - 1);
               }
@@ -819,13 +949,33 @@ export function DragProvider({
           }
         }
 
-        // MOVE BEHAVIOR: Move the instance (no duplication in same window)
-        if (fromC.id === toC.id) {
-          // Same container - reorder
-          const items = fromC.items || [];
-          const fromIndex = items.indexOf(payload.id);
+        // Get gridId for creating new occurrences
+        const gridId = state?.gridId || state?.grid?._id;
+
+        // Check if we're in copy mode
+        const isCopyMode = dragMode === 'copy';
+
+        if (isCopyMode) {
+          // COPY MODE: Create a new occurrence in the target container
+          // Source occurrence remains intact
+          LayoutHelpers.copyInstanceToContainer({
+            dispatch,
+            socket,
+            gridId,
+            sourceInstanceId: draggedInstanceId,
+            toContainer: toC,
+            toIndex,
+            emit: true,
+          });
+        } else if (fromC.id === toC.id) {
+          // MOVE MODE: Same container - reorder
+          const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            draggedInstanceId,
+            fromC.occurrences || [],
+            occurrencesById
+          );
           if (fromIndex !== -1) {
-            const finalToIndex = toIndex !== null ? toIndex : items.length;
+            const finalToIndex = toIndex !== null ? toIndex : (fromC.occurrences || []).length;
             if (fromIndex !== finalToIndex) {
               LayoutHelpers.reorderInstancesInContainer({
                 dispatch,
@@ -838,13 +988,13 @@ export function DragProvider({
             }
           }
         } else {
-          // Different containers - move
+          // MOVE MODE: Different containers - move (pass occurrence ID, not instance ID)
           LayoutHelpers.moveInstanceBetweenContainers({
             dispatch,
             socket,
             fromContainer: fromC,
             toContainer: toC,
-            instanceId: payload.id,
+            occurrenceId,
             toIndex,
             emit: true,
           });
@@ -864,66 +1014,62 @@ export function DragProvider({
       const id = makeUUID();
       let toIndex = dropTarget.context?.insertAt ?? null;
 
-      console.log('[EXTERNAL DROP] Starting calculation:', { x, y, containerId, insertAt: dropTarget.context?.insertAt });
+      const container = baseContainers.find((c) => c.id === containerId);
+      if (!container) {
+        clearSession();
+        return;
+      }
 
-      // Always find nearest instance based on cursor position (more reliable than hover detection)
+      // Find nearest instance based on cursor position using occurrences
       if (toIndex === null) {
-        const container = baseContainers.find((c) => c.id === containerId);
-        if (container) {
-          const items = container.items || [];
-          console.log('[EXTERNAL DROP] Found container with items:', items);
+        const occurrenceIds = container.occurrences || [];
 
-          if (items.length > 0) {
-            let nearestIndex = 0;
-            let nearestDistance = Infinity;
+        if (occurrenceIds.length > 0) {
+          let nearestIndex = 0;
+          let nearestDistance = Infinity;
 
-            // Find the nearest instance based on cursor position
-            items.forEach((itemId, index) => {
-              const el = document.querySelector(`[data-instance-id="${itemId}"]`);
+          // Find the nearest instance based on cursor position
+          occurrenceIds.forEach((occId, index) => {
+            const occ = occurrencesById[occId];
+            if (occ && occ.targetType === 'instance') {
+              const el = document.querySelector(`[data-instance-id="${occ.targetId}"]`);
               if (el) {
                 const rect = el.getBoundingClientRect();
                 const centerY = rect.top + rect.height / 2;
                 const distance = Math.abs(y - centerY);
-
-                console.log(`[EXTERNAL DROP] Instance ${index} (${itemId}):`, {
-                  top: rect.top,
-                  bottom: rect.bottom,
-                  centerY,
-                  cursorY: y,
-                  distance
-                });
 
                 if (distance < nearestDistance) {
                   nearestDistance = distance;
                   nearestIndex = index;
                 }
               }
-            });
+            }
+          });
 
-            console.log('[EXTERNAL DROP] Nearest instance:', { nearestIndex, nearestDistance });
-
-            // Determine if cursor is above or below the nearest instance
-            const nearestEl = document.querySelector(`[data-instance-id="${items[nearestIndex]}"]`);
+          // Determine if cursor is above or below the nearest instance
+          const nearestOcc = occurrencesById[occurrenceIds[nearestIndex]];
+          if (nearestOcc) {
+            const nearestEl = document.querySelector(`[data-instance-id="${nearestOcc.targetId}"]`);
             if (nearestEl) {
               const rect = nearestEl.getBoundingClientRect();
               const centerY = rect.top + rect.height / 2;
 
               if (y < centerY) {
                 toIndex = nearestIndex;  // Insert before
-                console.log('[EXTERNAL DROP] Cursor above center, inserting before:', toIndex);
               } else {
                 toIndex = nearestIndex + 1;  // Insert after
-                console.log('[EXTERNAL DROP] Cursor below center, inserting after:', toIndex);
               }
             }
           }
         }
       }
 
-      console.log('[EXTERNAL DROP] Final toIndex:', toIndex);
+      // Get gridId from state
+      const gridId = state?.gridId || state?.grid?._id;
 
       LayoutHelpers.createInstanceInContainer({
-        dispatch, socket, containerId,
+        dispatch, socket, gridId,
+        container,
         instance: { id, label },
         index: toIndex,
         emit: true,
@@ -941,46 +1087,42 @@ export function DragProvider({
         const id = makeUUID();
         let toIndex = dropTarget.context?.insertAt ?? null;
 
-        console.log('[CROSS-WINDOW DROP] Starting calculation:', { x, y, containerId, insertAt: dropTarget.context?.insertAt });
+        const container = baseContainers.find((c) => c.id === containerId);
+        if (!container) {
+          clearSession();
+          return;
+        }
 
-        // Always find nearest instance based on cursor position (more reliable than hover detection)
+        // Find nearest instance based on cursor position using occurrences
         if (toIndex === null) {
-          const container = baseContainers.find((c) => c.id === containerId);
-          if (container) {
-            const items = container.items || [];
-            console.log('[CROSS-WINDOW DROP] Found container with items:', items);
+          const occurrenceIds = container.occurrences || [];
 
-            if (items.length > 0) {
-              let nearestIndex = 0;
-              let nearestDistance = Infinity;
+          if (occurrenceIds.length > 0) {
+            let nearestIndex = 0;
+            let nearestDistance = Infinity;
 
-              // Find the nearest instance based on cursor position
-              items.forEach((itemId, index) => {
-                const el = document.querySelector(`[data-instance-id="${itemId}"]`);
+            // Find the nearest instance based on cursor position
+            occurrenceIds.forEach((occId, index) => {
+              const occ = occurrencesById[occId];
+              if (occ && occ.targetType === 'instance') {
+                const el = document.querySelector(`[data-instance-id="${occ.targetId}"]`);
                 if (el) {
                   const rect = el.getBoundingClientRect();
                   const centerY = rect.top + rect.height / 2;
                   const distance = Math.abs(y - centerY);
-
-                  console.log(`[CROSS-WINDOW DROP] Instance ${index} (${itemId}):`, {
-                    top: rect.top,
-                    bottom: rect.bottom,
-                    centerY,
-                    cursorY: y,
-                    distance
-                  });
 
                   if (distance < nearestDistance) {
                     nearestDistance = distance;
                     nearestIndex = index;
                   }
                 }
-              });
+              }
+            });
 
-              console.log('[CROSS-WINDOW DROP] Nearest instance:', { nearestIndex, nearestDistance });
-
-              // Determine if cursor is above or below the nearest instance
-              const nearestEl = document.querySelector(`[data-instance-id="${items[nearestIndex]}"]`);
+            // Determine if cursor is above or below the nearest instance
+            const nearestOcc = occurrencesById[occurrenceIds[nearestIndex]];
+            if (nearestOcc) {
+              const nearestEl = document.querySelector(`[data-instance-id="${nearestOcc.targetId}"]`);
               if (nearestEl) {
                 const rect = nearestEl.getBoundingClientRect();
                 const centerY = rect.top + rect.height / 2;
@@ -995,9 +1137,13 @@ export function DragProvider({
           }
         }
 
+        // Get gridId from state
+        const gridId = state?.gridId || state?.grid?._id;
+
         const label = parsed.meta?.label || parsed.data?.label || "Untitled";
         LayoutHelpers.createInstanceInContainer({
-          dispatch, socket, containerId,
+          dispatch, socket, gridId,
+          container,
           instance: { id, label },
           index: toIndex,
           emit: true,
@@ -1006,7 +1152,7 @@ export function DragProvider({
     }
 
     clearSession();
-  }, [dispatch, socket, getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, baseAllPanels, baseContainers, clearSession, state]);
+  }, [dispatch, socket, getCellFromPoint, getHoveredPanelId, getHoveredContainerId, getHoveredInstanceId, baseAllPanels, baseContainers, occurrencesById, clearSession, state]);
 
   const handleDragEnd = useCallback(() => {
     clearSession();
@@ -1102,6 +1248,13 @@ export function DragProvider({
     hotTarget,
     panelOverCellId,
 
+    // Copy/Move mode
+    dragMode,
+    setDragMode,
+    toggleDragMode,
+    isCopyMode: dragMode === 'copy',
+    isMoveMode: dragMode === 'move',
+
     // Booleans
     isPanelDrag: activeType === DragType.PANEL,
     isContainerDrag: activeType === DragType.CONTAINER,
@@ -1125,6 +1278,7 @@ export function DragProvider({
   }), [
     handleDragStart, handleDragMove, handleDragOver, handleDrop, handleDragEnd,
     activePayload, activeType, activeId, isDragging, hotTarget, panelOverCellId,
+    dragMode, toggleDragMode,
     getWorkingPanels, getWorkingAllPanels, getWorkingContainers,
     getStacksByCell, getStackForPanel, setActivePanelInCell, cyclePanelStack,
     getHoveredPanelId, getHoveredContainerId,

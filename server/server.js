@@ -30,11 +30,23 @@ import Container from "./models/Container.js";
 import Panel from "./models/Panel.js";
 import Grid from "./models/Grid.js";
 import User from "./models/User.js";
+import Occurrence from "./models/Occurrence.js";
+import Field from "./models/Field.js";
 
 // ========================================================
 // JWT
 // ========================================================
 import jwt from "jsonwebtoken";
+
+// ========================================================
+// OCCURRENCE HELPERS
+// ========================================================
+import { autofillOccurrences, autofillGrid, autofillPanel, autofillContainer, getOccurrencesForGrid, createOccurrenceData } from "./utils/occurrenceHelpers.js";
+
+// ========================================================
+// DEFAULT USER DATA (for new user registration)
+// ========================================================
+import createDefaultUserData from "./utils/createDefaultUserData.js";
 const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET";
 function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
@@ -125,6 +137,8 @@ console.log("🧪 Using MONGO_URI:", MONGO_URI);
 //   panelsById: { [panelId]: panelObj },             // userId-only
 //   containersById: { [containerId]: containerObj }, // userId-only
 //   instancesById: { [instanceId]: instanceObj },    // userId-only
+//   occurrencesById: { [occurrenceId]: occurrenceObj }, // userId-only
+//   fieldsById: { [fieldId]: fieldObj },            // userId-only
 // };
 const cacheByUser = Object.create(null);
 
@@ -135,6 +149,8 @@ function ensureUserCache(userId) {
       panelsById: {},
       containersById: {},
       instancesById: {},
+      occurrencesById: {},
+      fieldsById: {},
     };
   }
   return cacheByUser[userId];
@@ -161,11 +177,13 @@ async function loadUserIntoCache(userId) {
 
   const uc = ensureUserCache(userId);
 
-  const [grids, panels, containers, instances] = await Promise.all([
+  const [grids, panels, containers, instances, occurrences, fields] = await Promise.all([
     Grid.find({ userId }).sort({ createdAt: 1 }),
     Panel.find({ userId }).sort({ createdAt: 1 }),
     Container.find({ userId }).sort({ createdAt: 1 }),
     Instance.find({ userId }).sort({ createdAt: 1 }),
+    Occurrence.find({ userId }).sort({ timestamp: -1 }),
+    Field.find({ userId }).sort({ createdAt: 1 }),
   ]);
 
   // ---- gridsById
@@ -192,7 +210,7 @@ async function loadUserIntoCache(userId) {
     uc.containersById[id] = {
       id,
       label: obj.label ?? "Untitled",
-      items: Array.isArray(obj.items) ? obj.items : [],
+      occurrences: Array.isArray(obj.occurrences) ? obj.occurrences : [],
     };
   });
 
@@ -208,11 +226,35 @@ async function loadUserIntoCache(userId) {
     };
   });
 
+  // ---- occurrencesById (user only)
+  uc.occurrencesById = {};
+  occurrences.forEach((o) => {
+    const obj = o.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.occurrencesById[id] = {
+      ...obj,
+      id,
+    };
+  });
+
+  // ---- fieldsById (user only)
+  uc.fieldsById = {};
+  fields.forEach((f) => {
+    const obj = f.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.fieldsById[id] = {
+      ...obj,
+      id,
+    };
+  });
+
   console.log("✅ CACHE READY FOR USER:", userId);
   console.log("   Grids:", Object.keys(uc.gridsById).length);
   console.log("   Panels:", Object.keys(uc.panelsById).length);
   console.log("   Containers:", Object.keys(uc.containersById).length);
   console.log("   Instances:", Object.keys(uc.instancesById).length);
+  console.log("   Occurrences:", Object.keys(uc.occurrencesById).length);
+  console.log("   Fields:", Object.keys(uc.fieldsById).length);
   console.log("===============================\n");
 
   return uc;
@@ -220,7 +262,7 @@ async function loadUserIntoCache(userId) {
 
 function userCacheReady(userId) {
   const uc = cacheByUser[userId];
-  return !!(uc && uc.gridsById && uc.panelsById && uc.containersById && uc.instancesById);
+  return !!(uc && uc.gridsById && uc.panelsById && uc.containersById && uc.instancesById && uc.occurrencesById && uc.fieldsById);
 }
 
 // ========================================================
@@ -255,10 +297,21 @@ io.on("connection", (socket) => {
     }
 
     const user = await User.create({ email, password });
+    const userId = user._id.toString();
     const token = signToken({ userId: user._id });
 
-    console.log("✅ Register success:", user._id.toString());
-    socket.emit("auth_success", { token, userId: user._id.toString() });
+    // Create default data for new user (habits, tasks, finances panels)
+    try {
+      console.log("📊 Creating default data for new user:", userId);
+      const { gridId, summary } = await createDefaultUserData(userId);
+      console.log("✅ Default data created - Grid:", gridId, "Summary:", summary);
+    } catch (err) {
+      console.error("⚠️ Failed to create default data:", err.message);
+      // Continue with registration even if default data fails
+    }
+
+    console.log("✅ Register success:", userId);
+    socket.emit("auth_success", { token, userId });
   });
 
   // ======================================================
@@ -305,12 +358,24 @@ io.on("connection", (socket) => {
         const gridObj = uc.gridsById[gid];
         const safeGrid = gridObj?.toObject ? gridObj.toObject() : gridObj;
 
+        // Get occurrences for this grid and autofill them
+        const gridOccurrences = getOccurrencesForGrid(gid, uc);
+
+        // Log occurrence counts by type
+        const occCounts = { panel: 0, container: 0, instance: 0 };
+        gridOccurrences.forEach(occ => {
+          if (occ.targetType) occCounts[occ.targetType] = (occCounts[occ.targetType] || 0) + 1;
+        });
+        console.log(`[emitFullState] Sending ${gridOccurrences.length} occurrences:`, occCounts);
+
         socket.emit("full_state", {
           gridId: gid,
           grid: safeGrid,
           panels: Object.values(uc.panelsById),
           containers: Object.values(uc.containersById),
           instances: Object.values(uc.instancesById),
+          occurrences: gridOccurrences,
+          fields: Object.values(uc.fieldsById),
           grids,
         });
       };
@@ -470,17 +535,17 @@ io.on("connection", (socket) => {
         userId,
       };
 
-      if (!Array.isArray(next.items)) next.items = [];
+      if (!Array.isArray(next.occurrences)) next.occurrences = [];
 
       uc.containersById[id] = {
         id,
         label: next.label ?? "Untitled",
-        items: next.items,
+        occurrences: next.occurrences,
       };
 
       await Container.findOneAndUpdate(
         { id, userId },
-        { id, userId, label: next.label ?? "Untitled", items: next.items },
+        { id, userId, label: next.label ?? "Untitled", occurrences: next.occurrences },
         { upsert: true }
       );
 
@@ -488,7 +553,7 @@ io.on("connection", (socket) => {
         container: {
           id,
           label: uc.containersById[id].label,
-          items: uc.containersById[id].items,
+          occurrences: uc.containersById[id].occurrences,
         },
       });
     } catch (err) {
@@ -512,18 +577,7 @@ io.on("connection", (socket) => {
 
       const instanceId = instance.id;
 
-      if (!uc.containersById[containerId]) {
-        uc.containersById[containerId] = { id: containerId, label: "Untitled", items: [] };
-
-        await Container.findOneAndUpdate(
-          { id: containerId, userId },
-          { id: containerId, userId, label: "Untitled", items: [] },
-          { upsert: true }
-        );
-      }
-
-      const c = uc.containersById[containerId];
-
+      // Just create the instance entity - occurrence management is handled separately
       const nextInst = {
         ...(uc.instancesById[instanceId] || {}),
         ...(instance || {}),
@@ -534,16 +588,7 @@ io.on("connection", (socket) => {
 
       uc.instancesById[instanceId] = nextInst;
 
-      if (!c.items.includes(instanceId)) c.items = [...c.items, instanceId];
-
-      await Promise.all([
-        Instance.findOneAndUpdate({ id: instanceId, userId }, nextInst, { upsert: true }),
-        Container.findOneAndUpdate(
-          { id: containerId, userId },
-          { items: c.items, label: c.label ?? "Untitled" },
-          { upsert: true }
-        ),
-      ]);
+      await Instance.findOneAndUpdate({ id: instanceId, userId }, nextInst, { upsert: true });
 
       socket.to(userRoom(userId)).emit("instance_created_in_container", {
         containerId,
@@ -556,7 +601,7 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // CONTAINER ITEMS UPDATE (UPSERTS container if missing)
+  // CONTAINER OCCURRENCES UPDATE (UPSERTS container if missing)
   // ======================================================
   socket.on("update_container_items", async ({ containerId, items }) => {
     try {
@@ -566,22 +611,24 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
-      if (!containerId || !Array.isArray(items)) return;
+      // Backward compatibility: accept 'items' but treat as occurrences
+      const occurrences = items;
+      if (!containerId || !Array.isArray(occurrences)) return;
 
       if (!uc.containersById[containerId]) {
-        uc.containersById[containerId] = { id: containerId, label: "Untitled", items: [] };
+        uc.containersById[containerId] = { id: containerId, label: "Untitled", occurrences: [] };
       }
 
       const c = uc.containersById[containerId];
-      c.items = [...items];
+      c.occurrences = [...occurrences];
 
       await Container.findOneAndUpdate(
         { id: containerId, userId },
-        { id: containerId, userId, label: c.label ?? "Untitled", items: c.items },
+        { id: containerId, userId, label: c.label ?? "Untitled", occurrences: c.occurrences },
         { upsert: true }
       );
 
-      socket.to(userRoom(userId)).emit("container_items_updated", { containerId, items: c.items });
+      socket.to(userRoom(userId)).emit("container_items_updated", { containerId, items: c.occurrences });
     } catch (err) {
       console.error("update_container_items error:", err);
       socket.emit("server_error", "Failed to update container");
@@ -603,12 +650,12 @@ io.on("connection", (socket) => {
       const id = container?.id;
       if (!id) return;
 
-      const prev = uc.containersById[id] || { id, label: "Untitled", items: [] };
+      const prev = uc.containersById[id] || { id, label: "Untitled", occurrences: [] };
 
       const next = {
         id,
         label: container.label ?? prev.label ?? "Untitled",
-        items: Array.isArray(container.items) ? container.items : prev.items ?? [],
+        occurrences: Array.isArray(container.occurrences) ? container.occurrences : prev.occurrences ?? [],
       };
 
       uc.containersById[id] = next;
@@ -659,9 +706,9 @@ io.on("connection", (socket) => {
 
   // ======================================================
   // INSTANCE DELETE — cascade:
-  // - delete instance
-  // - pull instanceId out of ALL containers.items
-  // - emit instance_deleted + container_items_updated for affected containers
+  // - delete instance entity
+  // - delete all occurrences of this instance
+  // - remove occurrence IDs from container.occurrences arrays
   // ======================================================
   socket.on("delete_instance", async ({ instanceId } = {}) => {
     try {
@@ -672,23 +719,39 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
+      // Delete instance entity
       if (uc.instancesById?.[instanceId]) delete uc.instancesById[instanceId];
       await Instance.findOneAndDelete({ id: instanceId, userId });
 
-      const affectedContainers = [];
-      for (const c of Object.values(uc.containersById || {})) {
-        if (!Array.isArray(c.items)) continue;
-        if (!c.items.includes(instanceId)) continue;
+      // Find and delete all occurrences of this instance
+      const instanceOccurrences = Object.values(uc.occurrencesById || {}).filter(
+        (occ) => occ.targetType === "instance" && occ.targetId === instanceId
+      );
 
-        const nextItems = c.items.filter((iid) => iid !== instanceId);
-        c.items = nextItems;
-        affectedContainers.push({ containerId: c.id, items: nextItems });
+      for (const occ of instanceOccurrences) {
+        delete uc.occurrencesById[occ.id];
+        await Occurrence.findOneAndDelete({ id: occ.id, userId });
+        socket.to(userRoom(userId)).emit("occurrence_deleted", { occurrenceId: occ.id });
       }
 
-      await Container.updateMany({ userId, items: instanceId }, { $pull: { items: instanceId } });
+      // Remove occurrence IDs from containers
+      const affectedContainers = [];
+      const occurrenceIds = instanceOccurrences.map(o => o.id);
 
-      for (const { containerId, items } of affectedContainers) {
-        socket.to(userRoom(userId)).emit("container_items_updated", { containerId, items });
+      for (const c of Object.values(uc.containersById || {})) {
+        if (!Array.isArray(c.occurrences)) continue;
+        const hadOccurrence = c.occurrences.some(occId => occurrenceIds.includes(occId));
+        if (!hadOccurrence) continue;
+
+        const nextOccurrences = c.occurrences.filter((occId) => !occurrenceIds.includes(occId));
+        c.occurrences = nextOccurrences;
+        affectedContainers.push(c);
+      }
+
+      await Container.updateMany({ userId }, { $pull: { occurrences: { $in: occurrenceIds } } });
+
+      for (const container of affectedContainers) {
+        socket.to(userRoom(userId)).emit("container_updated", { container });
       }
 
       socket.to(userRoom(userId)).emit("instance_deleted", { instanceId });
@@ -720,7 +783,7 @@ io.on("connection", (socket) => {
       };
 
       if (!next.props) next.props = {};
-      if (!Array.isArray(next.containers)) next.containers = [];
+      if (!Array.isArray(next.occurrences)) next.occurrences = [];
 
       uc.panelsById[panelId] = next;
 
@@ -753,7 +816,7 @@ io.on("connection", (socket) => {
       };
 
       if (!next.props) next.props = {};
-      if (!Array.isArray(next.containers)) next.containers = [];
+      if (!Array.isArray(next.occurrences)) next.occurrences = [];
 
       uc.panelsById[panelId] = next;
 
@@ -789,7 +852,10 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // CONTAINER DELETE — removes container + pulls from ALL panels.containers
+  // CONTAINER DELETE — cascade:
+  // - delete container entity
+  // - delete all occurrences of this container
+  // - remove occurrence IDs from panel.occurrences arrays
   // ======================================================
   socket.on("delete_container", async ({ containerId } = {}) => {
     try {
@@ -800,21 +866,37 @@ io.on("connection", (socket) => {
       if (!userCacheReady(userId)) await loadUserIntoCache(userId);
       const uc = ensureUserCache(userId);
 
+      // Delete container entity
       if (uc.containersById?.[containerId]) delete uc.containersById[containerId];
       await Container.findOneAndDelete({ id: containerId, userId });
 
+      // Find and delete all occurrences of this container
+      const containerOccurrences = Object.values(uc.occurrencesById || {}).filter(
+        (occ) => occ.targetType === "container" && occ.targetId === containerId
+      );
+
+      for (const occ of containerOccurrences) {
+        delete uc.occurrencesById[occ.id];
+        await Occurrence.findOneAndDelete({ id: occ.id, userId });
+        socket.to(userRoom(userId)).emit("occurrence_deleted", { occurrenceId: occ.id });
+      }
+
+      // Remove occurrence IDs from panels
       const affectedPanels = [];
+      const occurrenceIds = containerOccurrences.map(o => o.id);
 
       for (const p of Object.values(uc.panelsById || {})) {
-        if (!Array.isArray(p.containers)) continue;
-        if (!p.containers.includes(containerId)) continue;
+        if (!Array.isArray(p.occurrences)) continue;
+        const hadOccurrence = p.occurrences.some(occId => occurrenceIds.includes(occId));
+        if (!hadOccurrence) continue;
 
-        const next = { ...p, containers: p.containers.filter((cid) => cid !== containerId) };
+        const nextOccurrences = p.occurrences.filter((occId) => !occurrenceIds.includes(occId));
+        const next = { ...p, occurrences: nextOccurrences };
         uc.panelsById[next.id] = next;
         affectedPanels.push(next);
       }
 
-      await Panel.updateMany({ userId, containers: containerId }, { $pull: { containers: containerId } });
+      await Panel.updateMany({ userId }, { $pull: { occurrences: { $in: occurrenceIds } } });
 
       for (const panel of affectedPanels) {
         socket.to(userRoom(userId)).emit("panel_updated", panel);
@@ -824,6 +906,173 @@ io.on("connection", (socket) => {
     } catch (err) {
       console.error("delete_container error:", err);
       socket.emit("server_error", "Failed to delete container");
+    }
+  });
+
+  // ======================================================
+  // OCCURRENCES — CREATE/UPDATE/DELETE
+  // ======================================================
+  socket.on("create_occurrence", async ({ occurrence } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const id = occurrence?.id;
+      if (!id) return;
+
+      const occurrenceData = createOccurrenceData({
+        id,
+        userId,
+        targetType: occurrence.targetType,
+        targetId: occurrence.targetId,
+        gridId: occurrence.gridId,
+        iteration: occurrence.iteration,
+        placement: occurrence.placement,
+        fields: occurrence.fields,
+        meta: occurrence.meta,
+      });
+
+      uc.occurrencesById[id] = occurrenceData;
+
+      await Occurrence.findOneAndUpdate(
+        { id, userId },
+        occurrenceData,
+        { upsert: true }
+      );
+
+      socket.to(userRoom(userId)).emit("occurrence_created", {
+        occurrence: occurrenceData,
+      });
+    } catch (err) {
+      console.error("create_occurrence error:", err);
+      socket.emit("server_error", "Failed to create occurrence");
+    }
+  });
+
+  socket.on("update_occurrence", async ({ occurrence } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const id = occurrence?.id;
+      if (!id) return;
+
+      const prev = uc.occurrencesById[id] || {};
+      const next = { ...prev, ...occurrence, id, userId };
+
+      uc.occurrencesById[id] = next;
+
+      await Occurrence.findOneAndUpdate({ id, userId }, next, { upsert: true });
+
+      socket.to(userRoom(userId)).emit("occurrence_updated", { occurrence: next });
+    } catch (err) {
+      console.error("update_occurrence error:", err);
+      socket.emit("server_error", "Failed to update occurrence");
+    }
+  });
+
+  socket.on("delete_occurrence", async ({ occurrenceId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+      if (!occurrenceId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      if (uc.occurrencesById?.[occurrenceId]) delete uc.occurrencesById[occurrenceId];
+      await Occurrence.findOneAndDelete({ id: occurrenceId, userId });
+
+      socket.to(userRoom(userId)).emit("occurrence_deleted", { occurrenceId });
+    } catch (err) {
+      console.error("delete_occurrence error:", err);
+      socket.emit("server_error", "Failed to delete occurrence");
+    }
+  });
+
+  // ======================================================
+  // FIELDS — CREATE/UPDATE/DELETE
+  // ======================================================
+  socket.on("create_field", async ({ field } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const id = field?.id;
+      if (!id) return;
+
+      const fieldData = {
+        id,
+        userId,
+        name: field.name || "Untitled",
+        type: field.type || "text",
+        mode: field.mode || "input",
+        unit: field.unit,
+        metric: field.metric,
+        meta: field.meta || {},
+      };
+
+      uc.fieldsById[id] = fieldData;
+
+      await Field.findOneAndUpdate({ id, userId }, fieldData, { upsert: true });
+
+      socket.to(userRoom(userId)).emit("field_created", { field: fieldData });
+    } catch (err) {
+      console.error("create_field error:", err);
+      socket.emit("server_error", "Failed to create field");
+    }
+  });
+
+  socket.on("update_field", async ({ field } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const id = field?.id;
+      if (!id) return;
+
+      const prev = uc.fieldsById[id] || {};
+      const next = { ...prev, ...field, id, userId };
+
+      uc.fieldsById[id] = next;
+
+      await Field.findOneAndUpdate({ id, userId }, next, { upsert: true });
+
+      socket.to(userRoom(userId)).emit("field_updated", { field: next });
+    } catch (err) {
+      console.error("update_field error:", err);
+      socket.emit("server_error", "Failed to update field");
+    }
+  });
+
+  socket.on("delete_field", async ({ fieldId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+      if (!fieldId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      if (uc.fieldsById?.[fieldId]) delete uc.fieldsById[fieldId];
+      await Field.findOneAndDelete({ id: fieldId, userId });
+
+      socket.to(userRoom(userId)).emit("field_deleted", { fieldId });
+    } catch (err) {
+      console.error("delete_field error:", err);
+      socket.emit("server_error", "Failed to delete field");
     }
   });
 
@@ -920,6 +1169,7 @@ io.on("connection", (socket) => {
 
         const grids = await getAllGridsForUser(userId);
         const safeGrid = uc.gridsById[nextId];
+        const gridOccurrences = getOccurrencesForGrid(nextId, uc);
 
         socket.emit("full_state", {
           gridId: nextId,
@@ -927,6 +1177,8 @@ io.on("connection", (socket) => {
           panels: Object.values(uc.panelsById),
           containers: Object.values(uc.containersById),
           instances: Object.values(uc.instancesById),
+          occurrences: gridOccurrences,
+          fields: Object.values(uc.fieldsById),
           grids,
         });
       }

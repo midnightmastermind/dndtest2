@@ -38,6 +38,16 @@ export const ActionTypes = {
 
   CREATE_INSTANCE_IN_CONTAINER: "CREATE_INSTANCE_IN_CONTAINER",
 
+  CREATE_OCCURRENCE: "CREATE_OCCURRENCE",
+  UPDATE_OCCURRENCE: "UPDATE_OCCURRENCE",
+  DELETE_OCCURRENCE: "DELETE_OCCURRENCE",
+  SET_OCCURRENCES: "SET_OCCURRENCES",
+
+  CREATE_FIELD: "CREATE_FIELD",
+  UPDATE_FIELD: "UPDATE_FIELD",
+  DELETE_FIELD: "DELETE_FIELD",
+  SET_FIELDS: "SET_FIELDS",
+
   SET_ACTIVE_ID: "SET_ACTIVE_ID",
   SET_ACTIVE_SIZE: "SET_ACTIVE_SIZE",
   SOFT_TICK: "SOFT_TICK",
@@ -157,10 +167,52 @@ export const deleteInstanceAction = (instanceId) => ({
   payload: { instanceId },
 });
 
-// ✅ IMPORTANT for your server’s supported API
+// ✅ IMPORTANT for your server's supported API
 export const createInstanceInContainerAction = ({ containerId, instance }) => ({
   type: ActionTypes.CREATE_INSTANCE_IN_CONTAINER,
   payload: { containerId, instance },
+});
+
+// ---- occurrences ----
+export const setOccurrencesAction = (occurrences) => ({
+  type: ActionTypes.SET_OCCURRENCES,
+  payload: { occurrences },
+});
+
+export const createOccurrenceAction = (occurrence) => ({
+  type: ActionTypes.CREATE_OCCURRENCE,
+  payload: { occurrence },
+});
+
+export const updateOccurrenceAction = (occurrence) => ({
+  type: ActionTypes.UPDATE_OCCURRENCE,
+  payload: { occurrence },
+});
+
+export const deleteOccurrenceAction = (occurrenceId) => ({
+  type: ActionTypes.DELETE_OCCURRENCE,
+  payload: { occurrenceId },
+});
+
+// ---- fields ----
+export const setFieldsAction = (fields) => ({
+  type: ActionTypes.SET_FIELDS,
+  payload: { fields },
+});
+
+export const createFieldAction = (field) => ({
+  type: ActionTypes.CREATE_FIELD,
+  payload: { field },
+});
+
+export const updateFieldAction = (field) => ({
+  type: ActionTypes.UPDATE_FIELD,
+  payload: { field },
+});
+
+export const deleteFieldAction = (fieldId) => ({
+  type: ActionTypes.DELETE_FIELD,
+  payload: { fieldId },
 });
 
 // ---- dnd/ui ----

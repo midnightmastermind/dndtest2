@@ -13,6 +13,12 @@ import {
   createInstanceInContainerAction,
   updateInstanceAction,
   deleteInstanceAction,
+  createOccurrenceAction,
+  updateOccurrenceAction,
+  deleteOccurrenceAction,
+  createFieldAction,
+  updateFieldAction,
+  deleteFieldAction,
 } from "../state/actions";
 
 /**
@@ -134,4 +140,42 @@ export function deleteInstance({ dispatch, socket, instanceId, emit = true }) {
   if (!instanceId) return;
   dispatch?.(deleteInstanceAction(instanceId));
   if (shouldEmit(emit)) socket?.emit("delete_instance", { instanceId });
+}
+
+// ===== OCCURRENCE =====
+export function createOccurrence({ dispatch, socket, occurrence, emit = true }) {
+  if (!occurrence?.id) return;
+  dispatch?.(createOccurrenceAction(occurrence));
+  if (shouldEmit(emit)) socket?.emit("create_occurrence", { occurrence });
+}
+
+export function updateOccurrence({ dispatch, socket, occurrence, emit = true }) {
+  if (!occurrence?.id) return;
+  dispatch?.(updateOccurrenceAction(occurrence));
+  if (shouldEmit(emit)) socket?.emit("update_occurrence", { occurrence });
+}
+
+export function deleteOccurrence({ dispatch, socket, occurrenceId, emit = true }) {
+  if (!occurrenceId) return;
+  dispatch?.(deleteOccurrenceAction(occurrenceId));
+  if (shouldEmit(emit)) socket?.emit("delete_occurrence", { occurrenceId });
+}
+
+// ===== FIELD =====
+export function createField({ dispatch, socket, field, emit = true }) {
+  if (!field?.id) return;
+  dispatch?.(createFieldAction(field));
+  if (shouldEmit(emit)) socket?.emit("create_field", { field });
+}
+
+export function updateField({ dispatch, socket, field, emit = true }) {
+  if (!field?.id) return;
+  dispatch?.(updateFieldAction(field));
+  if (shouldEmit(emit)) socket?.emit("update_field", { field });
+}
+
+export function deleteField({ dispatch, socket, fieldId, emit = true }) {
+  if (!fieldId) return;
+  dispatch?.(deleteFieldAction(fieldId));
+  if (shouldEmit(emit)) socket?.emit("delete_field", { fieldId });
 }

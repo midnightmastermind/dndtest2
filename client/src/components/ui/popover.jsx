@@ -12,7 +12,7 @@ export const PopoverContent = React.forwardRef(
         ref={ref}
         align={align}
         collisionPadding={0}   // try 0 or 8
-  avoidCollisions={true} // default true
+        avoidCollisions={true} // default true
         sideOffset={sideOffset}
         className={cn(
           // ✅ no fixed width here

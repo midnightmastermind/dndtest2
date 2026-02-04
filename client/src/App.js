@@ -20,7 +20,8 @@ import Toolbar from "./Toolbar";
 import { SpinnerOverlay } from "./components/ui/spinner";
 
 import * as CommitHelpers from "./helpers/CommitHelpers";
-import * as LayoutHelpers from "./helpers/LayoutHelpers"; // ✅ NEW
+import * as LayoutHelpers from "./helpers/LayoutHelpers";
+import { buildLookup } from "./helpers/LayoutHelpers";
 
 function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
   const taken = new Set(panels.map((p) => `${p.row}-${p.col}`));
@@ -36,21 +37,51 @@ function findNextOpenPosition(panels = [], rows = 1, cols = 1) {
 export default function App() {
   const { state, dispatch } = useBoardState();
 
-  const instancesById = useMemo(() => {
-    const m = Object.create(null);
-    for (const inst of state.instances || []) m[inst.id] = inst;
-    return m;
-  }, [state.instances]);
+  const instancesById = useMemo(
+    () => buildLookup(state.instances),
+    [state.instances]
+  );
+
+  const occurrencesById = useMemo(
+    () => buildLookup(state.occurrences),
+    [state.occurrences]
+  );
+
+  const containersById = useMemo(
+    () => buildLookup(state.containers),
+    [state.containers]
+  );
+
+  const fieldsById = useMemo(
+    () => buildLookup(state.fields),
+    [state.fields]
+  );
 
   const [gridName, setGridName] = useState("");
   const [rowInput, setRowInput] = useState("1");
   const [colInput, setColInput] = useState("1");
+
+  // Iteration state
+  const iterations = state?.grid?.iterations || [{ id: "default", name: "Daily", timeFilter: "daily" }];
+  const [selectedIterationId, setSelectedIterationId] = useState(
+    state?.grid?.selectedIterationId || "default"
+  );
+  const [currentIterationValue, setCurrentIterationValue] = useState(
+    state?.grid?.currentIterationValue ? new Date(state.grid.currentIterationValue) : new Date()
+  );
 
   useEffect(() => {
     if (state?.grid) {
       setGridName(state.grid.name || "");
       setRowInput(String(state.grid.rows ?? 1));
       setColInput(String(state.grid.cols ?? 1));
+      // Sync iteration state from grid
+      if (state.grid.selectedIterationId) {
+        setSelectedIterationId(state.grid.selectedIterationId);
+      }
+      if (state.grid.currentIterationValue) {
+        setCurrentIterationValue(new Date(state.grid.currentIterationValue));
+      }
     } else {
       setGridName("");
       setRowInput("1");
@@ -188,43 +219,47 @@ export default function App() {
 
       const id = crypto.randomUUID();
       const label = `List ${(state.containers?.length || 0) + 1}`;
-      const container = { id, label, items: [] };
-
-      CommitHelpers.createContainer({ dispatch, socket, container, emit: true });
+      const container = { id, label, occurrences: [] };
 
       const panel = (state.panels || []).find((p) => p.id === panelId);
       if (!panel) return;
 
-      LayoutHelpers.addContainerToPanel({
+      // Use the occurrence-based helper which creates container + occurrence + adds to panel
+      LayoutHelpers.createContainerInPanel({
         dispatch,
         socket,
+        gridId: state.gridId,
         panel,
-        containerId: id,
+        container,
         emit: true,
       });
     },
-    [dispatch, state.gridId, state.containers, state.panels]
+    [dispatch, state.gridId, state.containers, state.panels, socket]
   );
 
-  // ✅ UPDATED: use the server-supported atomic event
+  // ✅ UPDATED: use occurrence-based creation
   const addInstanceToContainer = useCallback(
     (containerId) => {
-      if (!containerId) return;
+      if (!containerId || !state.gridId) return;
 
       const id = crypto.randomUUID();
       const label = `Item ${(state.instances?.length || 0) + 1}`;
       const instance = { id, label };
 
-      // preferred atomic path (upsert instance + attach to container)
-      CommitHelpers.createInstanceInContainer({
+      const container = (state.containers || []).find((c) => c.id === containerId);
+      if (!container) return;
+
+      // Use the occurrence-based helper which creates instance + occurrence + adds to container
+      LayoutHelpers.createInstanceInContainer({
         dispatch,
         socket,
-        containerId,
+        gridId: state.gridId,
+        container,
         instance,
         emit: true,
       });
     },
-    [dispatch, state.instances]
+    [dispatch, state.instances, state.gridId, state.containers, socket]
   );
 
   const deleteGridFinal = useCallback(() => {
@@ -234,18 +269,68 @@ export default function App() {
     CommitHelpers.deleteGrid({ dispatch, socket, gridId, emit: true });
   }, [dispatch, state?.gridId, state?.grid?._id]);
 
+  // Iteration handlers
+  const handleSelectIteration = useCallback((iterationId) => {
+    setSelectedIterationId(iterationId);
+    const gridId = state?.gridId || state?.grid?._id;
+    if (gridId) {
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { selectedIterationId: iterationId },
+        emit: true,
+      });
+    }
+  }, [dispatch, state?.gridId, state?.grid?._id]);
+
+  const handleIterationValueChange = useCallback((date) => {
+    setCurrentIterationValue(date);
+    const gridId = state?.gridId || state?.grid?._id;
+    if (gridId) {
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { currentIterationValue: date.toISOString() },
+        emit: true,
+      });
+    }
+  }, [dispatch, state?.gridId, state?.grid?._id]);
+
+  const handleCommitIterations = useCallback((newIterations) => {
+    const gridId = state?.gridId || state?.grid?._id;
+    if (gridId) {
+      CommitHelpers.updateGrid({
+        dispatch,
+        socket,
+        gridId,
+        grid: { iterations: newIterations },
+        emit: true,
+      });
+    }
+  }, [dispatch, state?.gridId, state?.grid?._id]);
+
   const dataValue = useMemo(
     () => ({
+      // Raw state - components use lookups from context (occurrencesById, instancesById, containersById)
       state: {
         userId: state.userId,
         gridId: state.gridId,
         grid: state.grid,
-        panels: state.panels,
-        containers: state.containers,
-        instances: state.instances,
+        panels: state.panels || [],
+        containers: state.containers || [],
+        instances: state.instances || [],
+        occurrences: state.occurrences || [],
+        fields: state.fields || [],
         activeId: state.activeId,
         activeSize: state.activeSize,
         softTick: state.softTick,
+        // Iteration context
+        containersById,
+        panelsById: buildLookup(state.panels),
+        selectedIterationId,
+        currentIterationValue,
       },
     }),
     [
@@ -255,10 +340,20 @@ export default function App() {
       state.panels,
       state.containers,
       state.instances,
+      state.occurrences,
+      state.fields,
       state.activeId,
       state.activeSize,
       state.softTick,
+      containersById,
+      selectedIterationId,
+      currentIterationValue,
     ]
+  );
+
+  const panelsById = useMemo(
+    () => buildLookup(state.panels),
+    [state.panels]
   );
 
   const actionsValue = useMemo(
@@ -267,10 +362,36 @@ export default function App() {
       dispatch,
 
       instancesById,
+      occurrencesById,
+      containersById,
+      fieldsById,
+      panelsById,
       addContainerToPanel,
       addInstanceToContainer,
+      // Iteration handlers
+      onCommitIterations: handleCommitIterations,
+      iterations,
+      selectedIterationId,
+      currentIterationValue,
+      onSelectIteration: handleSelectIteration,
+      onIterationValueChange: handleIterationValueChange,
     }),
-    [dispatch, instancesById, addContainerToPanel, addInstanceToContainer]
+    [
+      dispatch,
+      instancesById,
+      occurrencesById,
+      containersById,
+      fieldsById,
+      panelsById,
+      addContainerToPanel,
+      addInstanceToContainer,
+      handleCommitIterations,
+      iterations,
+      selectedIterationId,
+      currentIterationValue,
+      handleSelectIteration,
+      handleIterationValueChange,
+    ]
   );
 
   const components = useMemo(
@@ -303,6 +424,12 @@ export default function App() {
           onUpdateCols={updateCols}
           onAddPanel={addNewPanel}
           onDeleteGrid={deleteGridFinal}
+          onCommitIterations={handleCommitIterations}
+          iterations={iterations}
+          selectedIterationId={selectedIterationId}
+          onSelectIteration={handleSelectIteration}
+          currentIterationValue={currentIterationValue}
+          onIterationValueChange={handleIterationValueChange}
         />
 
         <div className="app-root grid-frame bg-background2 ring-1 ring-black/40 rounded-xl p-3 shadow-inner border border-border">

@@ -56,6 +56,12 @@ button {
   border-radius: 6px;
 }
 */
+
+:root{
+  --moduli-mark:#0e2140;
+  --moduli-text:#4474c2;
+}
+
 .drag-handle {
   z-index: 100;
 }
@@ -143,9 +149,7 @@ button {
 .container-header {
   display: flex;
   justify-content: start;
-  align-items: center;
-  padding: 5px 0px 3px 5px;
-  border-bottom: 1px solid #222;
+  align-items: start;
   cursor: grab;
 }
 
@@ -170,7 +174,6 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 3px 8px 12px;
   border-radius: 6px;
   background: #4372ac;
   border: 1px solid #3a4452;

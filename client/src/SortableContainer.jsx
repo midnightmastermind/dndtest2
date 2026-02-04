@@ -4,22 +4,24 @@
 // DROP: List accepts INSTANCE, FILE, TEXT, URL
 // ============================================================
 
-import React, { useMemo, useCallback, useState, useEffect } from "react";
+import React, { useMemo, useCallback, useState, useEffect, useContext } from "react";
 import { Button } from "@/components/ui/button";
 
 import SortableInstance from "./SortableInstance";
-import { Settings, PlusSquare, GripVertical } from "lucide-react";
+import { Settings, PlusSquare, GripVertical, Copy } from "lucide-react";
 import ButtonPopover from "./ui/ButtonPopover";
 import ContainerForm from "./ui/ContainerForm";
-
+import RadialMenu from "./ui/RadialMenu";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { GridActionsContext } from "./GridActionsContext";
 import * as CommitHelpers from "./helpers/CommitHelpers";
+import { getContainerItems, getContainerItemsWithOccurrences } from "./helpers/LayoutHelpers";
 import { useDragDrop, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
 
 function SortableContainer({
   container,
   panelId,
   panelLayoutOrientation = 'vertical',
-  instancesById,
   addInstanceToContainer,
   isHot = false,
   dispatch,
@@ -29,14 +31,17 @@ function SortableContainer({
   // ============================================================
   // CONTEXT
   // ============================================================
+  const { occurrencesById, instancesById } = useContext(GridActionsContext);
   const dragCtx = useDragContext();
-  const { isContainerDrag, isInstanceDrag, isExternalDrag, isPanelDrag } = dragCtx;
+  const { isContainerDrag, isInstanceDrag, isExternalDrag, isPanelDrag, dragMode, toggleDragMode } = dragCtx;
 
   // ============================================================
   // LOCAL STATE
   // ============================================================
   const [draft, setDraft] = useState(() => ({ label: container.label ?? "" }));
   const [isHoveringBottomSpace, setIsHoveringBottomSpace] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const containerDragMode = container?.defaultDragMode || "move";
 
   useEffect(() => {
     setDraft({ label: container.label ?? "" });
@@ -57,6 +62,14 @@ function SortableContainer({
     CommitHelpers.deleteContainer({ dispatch, socket, containerId: container.id, emit: true });
   }, [container.id, dispatch, socket]);
 
+  const commitIteration = useCallback((nextIteration) => {
+    CommitHelpers.updateContainer({ dispatch, socket, container: { ...container, iteration: nextIteration }, emit: true });
+  }, [container, dispatch, socket]);
+
+  const commitDragMode = useCallback((nextMode) => {
+    CommitHelpers.updateContainer({ dispatch, socket, container: { ...container, defaultDragMode: nextMode }, emit: true });
+  }, [container, dispatch, socket]);
+
   // ============================================================
   // LAYOUT DETECTION
   // ============================================================
@@ -69,14 +82,12 @@ function SortableContainer({
   // ============================================================
   // Include full instance objects for cross-window copying
   const containerWithInstances = useMemo(() => {
-    const instanceObjects = (container.items || [])
-      .map(id => instancesById[id])
-      .filter(Boolean);
+    const instanceObjects = getContainerItems(container, occurrencesById, instancesById);
     return {
       ...container,
       instanceObjects, // Add resolved instances for cross-window copy
     };
-  }, [container, instancesById]);
+  }, [container, occurrencesById, instancesById]);
 
   const { ref: containerRef, isDragging, isOver: isContainerOver, closestEdge, props: containerProps } = useDragDrop({
     type: DragType.CONTAINER,
@@ -111,17 +122,34 @@ function SortableContainer({
   });
 
   // ============================================================
-  // ITEMS
+  // ITEMS - lookup instances via occurrences (with occurrence data for fields)
   // ============================================================
-  const items = useMemo(() => {
-    return (container.items || []).map((id) => instancesById[id]).filter(Boolean);
-  }, [container.items, instancesById]);
+  const itemsWithOccurrences = useMemo(
+    () => getContainerItemsWithOccurrences(container, occurrencesById, instancesById),
+    [container, occurrencesById, instancesById]
+  );
+
+  // For backward compatibility with code that just needs instance count
+  const items = useMemo(
+    () => itemsWithOccurrences.map(item => item.instance),
+    [itemsWithOccurrences]
+  );
 
   // ============================================================
   // HIGHLIGHT
   // ============================================================
   // Show outline only for instance/external drops, not container reordering
   const highlightDrop = (isHot || isHeaderOver || isListOver) && (isInstanceDrag || isExternalDrag);
+
+  const toggleContainerDragModeQuick = useCallback(() => {
+    const nextMode = containerDragMode === "move" ? "copy" : "move";
+    CommitHelpers.updateContainer({
+      dispatch,
+      socket,
+      container: { ...container, defaultDragMode: nextMode },
+      emit: true,
+    });
+  }, [container, containerDragMode, dispatch, socket]);
 
   // ============================================================
   // RENDER
@@ -205,45 +233,59 @@ function SortableContainer({
         />
       )}
 
-      {/* HEADER - Draggable & Droppable (for inserting at top) */}
       <div
         ref={headerDropRef}
-        className="container-header no-select"
+        className="container-header no-select border-b border-gray-700 border-solid"
         style={{
           userSelect: "none",
           flex: "0 0 auto",
           display: "flex",
           alignItems: "center",
-          padding: "4px 6px",
-          borderBottom: "1px solid var(--border)",
           cursor: (isInstanceDrag || isExternalDrag) ? "default" : "grab",
           position: "relative",
+          height: "20px"
         }}
       >
-        <GripVertical className="h-4 w-4 text-muted-foreground mr-1" />
+        {/* ✅ Radial drag/menu handle + settings popover + add */}
+        <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <PopoverTrigger asChild>
+            <div
+              style={{ position: "relative", zIndex: 50, height: "100%", display: "flex" }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <RadialMenu
+                dragMode={containerDragMode}
+                onToggleDragMode={toggleContainerDragModeQuick}
+                onSettings={() => setSettingsOpen(true)}
+                onAddChild={onAdd}
+                addLabel="Item"
+                size="sm"
+              />
+            </div>
+          </PopoverTrigger>
 
-        <span className="text-xs font-medium flex-1 truncate">
-          {container.label || "Container"}
-        </span>
-
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-5 w-5" onClick={onAdd}>
-            <PlusSquare className="h-3 w-3" />
-          </Button>
-
-          <ButtonPopover label={<Settings className="h-3 w-3" />}>
+          <PopoverContent align="start" side="right" className="w-auto">
             <ContainerForm
               value={draft}
               onChange={setDraft}
               onCommitLabel={commitLabel}
               onDeleteContainer={deleteMe}
               containerId={container.id}
+              iteration={container.iteration}
+              onIterationChange={commitIteration}
+              defaultDragMode={container.defaultDragMode}
+              onDragModeChange={commitDragMode}
             />
-          </ButtonPopover>
-        </div>
+          </PopoverContent>
+        </Popover>
 
-        {/* Top drop indicator - when hovering header to insert at top of list */}
-        {/* Only show if container has items and dragging instance/external */}
+        {/* label */}
+        <span className="text-xs font-medium flex-1 pl-1 truncate">
+          {container.label || "Container"}
+        </span>
+
+        {/* Top insert indicator stays exactly as you had it */}
         {isHeaderOver && (isInstanceDrag || isExternalDrag) && items.length > 0 && (
           <div
             style={{
@@ -259,6 +301,7 @@ function SortableContainer({
           />
         )}
       </div>
+
 
       {/* LIST - Droppable */}
       <div
@@ -310,10 +353,11 @@ function SortableContainer({
         )}*/}
 
         <div style={{ position: "relative", zIndex: 1, padding: "5px", flex: 1, display: "flex", flexDirection: "column" }}>
-          {items.map((instance) => (
+          {itemsWithOccurrences.map(({ instance, occurrence }) => (
             <SortableInstance
               key={instance.id}
               instance={instance}
+              occurrence={occurrence}
               containerId={container.id}
               panelId={panelId}
               dispatch={dispatch}

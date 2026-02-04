@@ -10,6 +10,7 @@ import { useDragDrop, useDragContext, DragType, DropAccepts } from "./helpers/dr
 
 function SortableInstance({
   instance,
+  occurrence,
   containerId,
   panelId,
   dispatch,
@@ -122,6 +123,8 @@ function SortableInstance({
       <Instance
         id={instance.id}
         label={instance.label}
+        instance={instance}
+        occurrence={occurrence}
         dispatch={dispatch}
         socket={socket}
       />

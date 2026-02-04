@@ -9,6 +9,8 @@ export const GridDataContext = createContext({
     panels: [],
     containers: [],
     instances: [],
+    occurrences: [],
+    fields: [],
     activeId: null,
     activeSize: null,
     softTick: 0,

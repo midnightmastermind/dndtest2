@@ -4,14 +4,18 @@
 // DROP: Content accepts CONTAINER, INSTANCE, FILE, TEXT, URL
 // ============================================================
 
-import React, { useRef, useMemo, useState, useCallback, useEffect } from "react";
+import React, { useRef, useMemo, useState, useCallback, useEffect, useContext } from "react";
 import ResizeHandle from "./ResizeHandle";
+import RadialMenu from "./ui/RadialMenu";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 
 import { Button } from "./components/ui/button";
 import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
 
+import { GridActionsContext } from "./GridActionsContext";
 import * as CommitHelpers from "./helpers/CommitHelpers";
+import { getPanelContainers, getContainerItems } from "./helpers/LayoutHelpers";
 import { useDraggable, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
 
 import {
@@ -22,6 +26,7 @@ import {
   GripVertical,
   ChevronLeft,
   ChevronRight,
+  Copy,
 } from "lucide-react";
 
 // ============================================================
@@ -74,16 +79,17 @@ function Panel({
   rows,
   addContainerToPanel,
   addInstanceToContainer,
-  instancesById,
-  containersById,
   sizesRef,
   fullscreenPanelId,
   setFullscreenPanelId,
   forceFullscreen = false,
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const panelDragMode = panel?.defaultDragMode || "move";
   // ============================================================
   // CONTEXT
   // ============================================================
+  const { occurrencesById, instancesById, containersById } = useContext(GridActionsContext);
   const dragCtx = useDragContext();
   const {
     hotTarget,
@@ -92,6 +98,8 @@ function Panel({
     isExternalDrag,
     getStackForPanel,
     cyclePanelStack,
+    dragMode,
+    toggleDragMode,
   } = dragCtx;
 
   // ============================================================
@@ -102,11 +110,32 @@ function Panel({
 
   useEffect(() => () => window.clearTimeout(layoutSaveTimer.current), []);
 
+  const togglePanelDragModeQuick = useCallback(() => {
+    const nextMode = panelDragMode === "move" ? "copy" : "move";
+    CommitHelpers.updatePanel({
+      dispatch,
+      socket,
+      panel: { ...panel, defaultDragMode: nextMode },
+      emit: true,
+    });
+  }, [panel, panelDragMode, dispatch, socket]);
+
+
   const commitPanelLayout = useCallback((nextLayout) => {
     if (!panel) return;
     const curr = panel.layout || {};
     const merged = mergeLayout({ ...curr, ...nextLayout });
     CommitHelpers.updatePanel({ dispatch, socket, panel: { ...panel, layout: merged }, emit: true });
+  }, [panel, socket, dispatch]);
+
+  const commitPanelIteration = useCallback((nextIteration) => {
+    if (!panel) return;
+    CommitHelpers.updatePanel({ dispatch, socket, panel: { ...panel, iteration: nextIteration }, emit: true });
+  }, [panel, socket, dispatch]);
+
+  const commitPanelDragMode = useCallback((nextMode) => {
+    if (!panel) return;
+    CommitHelpers.updatePanel({ dispatch, socket, panel: { ...panel, defaultDragMode: nextMode }, emit: true });
   }, [panel, socket, dispatch]);
 
   const setLayout = useCallback((nextLayout) => {
@@ -160,25 +189,17 @@ function Panel({
 
   // Include full container and instance objects for cross-window copying
   const panelWithChildren = useMemo(() => {
-    const containerObjects = (panel.containers || [])
-      .map(id => {
-        const container = containersById[id];
-        if (!container) return null;
-        // Include instances for each container
-        const instanceObjects = (container.items || [])
-          .map(instId => instancesById[instId])
-          .filter(Boolean);
-        return {
-          ...container,
-          instanceObjects,
-        };
-      })
-      .filter(Boolean);
+    // Get containers via occurrence lookups
+    const containers = getPanelContainers(panel, occurrencesById, containersById);
+    const containerObjects = containers.map(container => ({
+      ...container,
+      instanceObjects: getContainerItems(container, occurrencesById, instancesById),
+    }));
     return {
       ...panel,
       containerObjects, // Add resolved containers with instances for cross-window copy
     };
-  }, [panel, containersById, instancesById]);
+  }, [panel, occurrencesById, containersById, instancesById]);
 
   const { ref: dragRef, isDragging } = useDraggable({
     type: DragType.PANEL,
@@ -216,11 +237,13 @@ function Panel({
   const isHotPanel = hotTarget?.panelId === panel.id;
 
   // ============================================================
-  // CONTAINERS
+  // CONTAINERS - lookup via occurrences
   // ============================================================
   const SortableContainer = components["SortableContainer"];
-  const containerIds = panel.containers || [];
-  const containersList = useMemo(() => containerIds.map((id) => containersById?.[id]).filter(Boolean), [containerIds, containersById]);
+  const containersList = useMemo(
+    () => getPanelContainers(panel, occurrencesById, containersById),
+    [panel, occurrencesById, containersById]
+  );
 
   // ============================================================
   // LAYOUT STYLES & ORIENTATION
@@ -339,19 +362,48 @@ function Panel({
             headerDropRef.current = node;
           }
         }}
-        className="panel-header no-select"
+        className="panel-header no-select border-b border-gray-700 border-solid"
         style={{
           userSelect: "none",
           cursor: isChildDrag ? "default" : "grab",
           display: "flex",
           alignItems: "center",
-          padding: "4px 8px 0px 8px",
-          borderBottom: "1px solid var(--border)",
           flex: "0 0 auto",
           position: "relative",
         }}
       >
-        <GripVertical className="h-4 w-4 text-muted-foreground mr-2" />
+        <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <PopoverTrigger asChild>
+            <div
+              style={{ position: "relative", zIndex: 50, display: "flex", height: "100%" }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <RadialMenu
+                dragMode={panelDragMode}
+                onToggleDragMode={togglePanelDragModeQuick}
+                onSettings={() => setSettingsOpen(true)}
+                onAddChild={() => addContainerToPanel?.(panel.id)} 
+                addLabel="Container"
+                size="sm"
+              />
+            </div>
+          </PopoverTrigger>
+
+          <PopoverContent align="start" side="right" className="w-auto">
+            <LayoutForm
+              value={layout}
+              onChange={setLayout}
+              onCommit={commitPanelLayout}
+              panelId={panel.id}
+              iteration={panel.iteration}
+              onIterationChange={commitPanelIteration}
+              defaultDragMode={panel.defaultDragMode}
+              onDragModeChange={commitPanelDragMode}
+            />
+          </PopoverContent>
+        </Popover>
+
 
         {/* Top drop indicator - when hovering header to insert at top (vertical layouts only) */}
         {/* Only show if panel has containers */}
@@ -370,7 +422,7 @@ function Panel({
           />
         )}
 
-        <span className="text-sm font-small flex-1 truncate">
+        <span className="text-sm font-small pl-1 flex-1 truncate">
           {layout.name || panel.id}
         </span>
 
@@ -387,18 +439,6 @@ function Panel({
             </Button>
           </div>
         )}
-
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => addContainerToPanel?.(panel.id)}>
-            <PlusSquare className="h-3 w-3" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={isFullscreen ? closeFullscreen : openFullscreen}>
-            {isFullscreen ? <Minimize className="h-3 w-3" /> : <Maximize className="h-3 w-3" />}
-          </Button>
-          <ButtonPopover label={<Settings className="h-3 w-3" />}>
-            <LayoutForm value={layout} onChange={setLayout} onCommit={commitPanelLayout} panelId={panel.id} />
-          </ButtonPopover>
-        </div>
       </div>
 
       {/* CONTENT - Droppable */}
@@ -437,7 +477,6 @@ function Panel({
               container={container}
               panelId={panel.id}
               panelLayoutOrientation={panelLayoutOrientation}
-              instancesById={instancesById}
               addInstanceToContainer={addInstanceToContainer}
               isHot={isHotPanel && hotTarget?.containerId === container.id}
               dispatch={dispatch}

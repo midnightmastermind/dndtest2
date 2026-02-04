@@ -13,8 +13,10 @@ export const initialState = {
   panels: [],
 
   // your current DnD app data (keep arrays!)
-  containers: [], // { id, label, items: [instanceId...] }
+  containers: [], // { id, label, occurrences: [occurrenceId...] }
   instances: [],  // { id, label }
+  occurrences: [], // { id, targetType, targetId, gridId, iteration, ... }
+  fields: [],      // { id, name, type, mode, ... }
 
   // drag state
   activeId: null,

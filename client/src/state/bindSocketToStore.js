@@ -107,6 +107,76 @@ export function bindSocketToStore(socket, dispatch) {
   socket.on("instance_deleted", onInstanceDeleted);
 
   // ======================================================
+  // OCCURRENCES (CRUD)
+  // ======================================================
+  function onOccurrenceCreated({ occurrence } = {}) {
+    if (!occurrence?.id) return;
+
+    dispatch({
+      type: ActionTypes.CREATE_OCCURRENCE,
+      payload: { occurrence },
+    });
+  }
+
+  function onOccurrenceUpdated({ occurrence } = {}) {
+    if (!occurrence?.id) return;
+
+    dispatch({
+      type: ActionTypes.UPDATE_OCCURRENCE,
+      payload: { occurrence },
+    });
+  }
+
+  function onOccurrenceDeleted(payload = {}) {
+    const occurrenceId = payload.occurrenceId || payload.id;
+    if (!occurrenceId) return;
+
+    dispatch({
+      type: ActionTypes.DELETE_OCCURRENCE,
+      payload: { occurrenceId },
+    });
+  }
+
+  socket.on("occurrence_created", onOccurrenceCreated);
+  socket.on("occurrence_updated", onOccurrenceUpdated);
+  socket.on("occurrence_deleted", onOccurrenceDeleted);
+
+  // ======================================================
+  // FIELDS (CRUD)
+  // ======================================================
+  function onFieldCreated({ field } = {}) {
+    if (!field?.id) return;
+
+    dispatch({
+      type: ActionTypes.CREATE_FIELD,
+      payload: { field },
+    });
+  }
+
+  function onFieldUpdated({ field } = {}) {
+    if (!field?.id) return;
+
+    dispatch({
+      type: ActionTypes.UPDATE_FIELD,
+      payload: { field },
+    });
+  }
+
+  function onFieldDeleted(payload = {}) {
+    const fieldId = payload.fieldId || payload.id;
+    if (!fieldId) return;
+
+    dispatch({
+      type: ActionTypes.DELETE_FIELD,
+      payload: { fieldId },
+    });
+  }
+
+  socket.on("field_created", onFieldCreated);
+  socket.on("field_updated", onFieldUpdated);
+  socket.on("field_deleted", onFieldDeleted);
+
+  // ======================================================
   // PANELS (CRUD)
   // ======================================================
   function onPanelUpdated(panel) {
@@ -275,6 +345,14 @@ export function bindSocketToStore(socket, dispatch) {
     socket.off("instance_created_in_container", onInstanceCreatedInContainer);
     socket.off("instance_updated", onInstanceUpdated);
     socket.off("instance_deleted", onInstanceDeleted);
+
+    socket.off("occurrence_created", onOccurrenceCreated);
+    socket.off("occurrence_updated", onOccurrenceUpdated);
+    socket.off("occurrence_deleted", onOccurrenceDeleted);
+
+    socket.off("field_created", onFieldCreated);
+    socket.off("field_updated", onFieldUpdated);
+    socket.off("field_deleted", onFieldDeleted);
 
     socket.off("panel_updated", onPanelUpdated);
     socket.off("panel_deleted", onPanelDeleted);
