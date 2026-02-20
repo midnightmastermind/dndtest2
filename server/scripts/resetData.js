@@ -14,7 +14,15 @@ import Container from "../models/Container.js";
 import Instance from "../models/Instance.js";
 import Occurrence from "../models/Occurrence.js";
 import Field from "../models/Field.js";
+import Transaction from "../models/Transaction.js";
 import User from "../models/User.js";
+import Manifest from "../models/Manifest.js";
+import View from "../models/View.js";
+import Doc from "../models/Doc.js";
+import Folder from "../models/Folder.js";
+import Artifact from "../models/Artifact.js";
+import Operation from "../models/Operation.js";
+import Iteration from "../models/Iteration.js";
 
 // Import the reusable utility
 import createDefaultUserData from "../utils/createDefaultUserData.js";
@@ -52,9 +60,17 @@ async function resetData() {
     await Instance.deleteMany({ userId });
     await Container.deleteMany({ userId });
     await Panel.deleteMany({ userId });
+    await Transaction.deleteMany({ userId });
     await Grid.deleteMany({ userId });
+    await Manifest.deleteMany({ userId });
+    await View.deleteMany({ userId });
+    await Doc.deleteMany({ userId });
+    await Folder.deleteMany({ userId });
+    await Artifact.deleteMany({ userId });
+    await Operation.deleteMany({ userId });
+    await Iteration.deleteMany({ userId });
 
-    console.log("   ✅ User data cleared\n");
+    console.log("   ✅ User data cleared (including transactions, operations, iterations)\n");
 
     // ===================================================================
     // STEP 2: Create default data using the reusable utility
@@ -76,13 +92,28 @@ async function resetData() {
     console.log(`   - Instances: ${summary.instances}`);
     console.log(`   - Containers: ${summary.containers}`);
     console.log(`   - Panels: ${summary.panels}`);
+    console.log(`   - Manifests: ${summary.manifests || 1}`);
+    console.log(`   - Views: ${summary.views || 1}`);
+    console.log(`   - Folders: ${summary.folders || 3}`);
+    console.log(`   - Docs: ${summary.docs || 2}`);
+    console.log(`   - Iterations: ${summary.iterations || 5}`);
+    console.log(`   - Operations: ${summary.operations || 1}`);
+    console.log(`   - Templates: ${summary.templates || 1}`);
     console.log("=".repeat(60));
     console.log("\n📖 Sample data includes:");
-    console.log("   - Habits panel: Water tracking, exercise, meditation, reading");
-    console.log("   - Tasks panel: Daily tasks, weekly planning");
-    console.log("   - Finances panel: Income, expenses with in/out flow demo");
-    console.log("   - Derived fields: Totals, targets (8 glasses water, 30 min exercise)");
-    console.log("   - Iteration examples: Daily, weekly, monthly filters");
+    console.log("   - Daily Toolkit: 8 wellness dimensions with copy-mode templates (persistent)");
+    console.log("   - Todo List: One-off tasks with untilDone persistence");
+    console.log("   - Schedule: 48 time slot containers (24-hour, 30-min increments)");
+    console.log("   - Daily Goals: 8 dimension summaries with derived/aggregate fields");
+    console.log("   - Accounts: Lifetime aggregation dashboards");
+    console.log("   - Day Page: Notebook with tree sidebar + daily journal");
+    console.log("   - Derived fields: Completed count, Total duration, Steps, Water, etc.");
+    console.log("   - Persistence modes: persistent, specific, untilDone");
+    console.log("   - Iteration: Daily, Weekly, Monthly + compound (Work/Personal)");
+    console.log("   - Category dimensions: Context (work, personal, health, finance)");
+    console.log("   - Templates: Morning Routine (6 items)");
+    console.log("   - File tree: Root → Day Pages + Documents folders with sample docs");
+    console.log("   - Operation: Auto count completed tasks (block tree)");
     console.log("=".repeat(60));
 
   } catch (error) {

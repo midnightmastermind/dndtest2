@@ -4,6 +4,8 @@ import { Separator } from "@/components/ui/separator";
 import FormInput from "./FormInput";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import IterationSettings from "./IterationSettings";
+import StyleEditor from "./StyleEditor";
 
 import { TooltipProvider, TooltipHelp } from "@/components/ui/tooltip";
 
@@ -13,6 +15,7 @@ import {
   ArrowLeftRight,
   ArrowUpDown,
   BrickWall,
+  AlignVerticalJustifyStart,
 } from "lucide-react";
 
 const LAYOUT_PRESETS = [
@@ -115,6 +118,42 @@ const LAYOUT_PRESETS = [
       justify: "start",
       gapPx: 8,
       gapPreset: "sm",
+
+      scrollX: "none",
+      scrollY: "auto",
+      scrollType: "auto",
+    },
+  },
+
+  {
+    id: "schedule",
+    label: "Schedule",
+    Icon: AlignVerticalJustifyStart,
+    hint: "Full-width column list",
+    description:
+      "Vertical list with full-width containers, tight spacing, ideal for schedule/timeline layouts.",
+    autoFill: false,
+    values: {
+      display: "flex",
+      flow: "col",
+      wrap: "nowrap",
+      columns: 0,
+      rows: 0,
+
+      widthMode: "auto",
+      minWidthPx: 0,
+      maxWidthPx: 0,
+
+      heightMode: "auto",
+      minHeightPx: 0,
+      maxHeightPx: 0,
+
+      alignItems: "stretch",
+      alignContent: "start",
+      justify: "start",
+      gapPx: 2,
+      gapPreset: "none",
+      padding: "none",
 
       scrollX: "none",
       scrollY: "auto",
@@ -264,9 +303,10 @@ const TIME_FILTER_OPTIONS = [
 const DRAG_MODE_OPTIONS = [
   { value: "move", label: "Move (relocate occurrence)" },
   { value: "copy", label: "Copy (create new occurrence)" },
+  { value: "copylink", label: "Copylink (linked occurrence)" },
 ];
 
-export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, panelId, iteration, onIterationChange, defaultDragMode, onDragModeChange }) {
+export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, panelId, panel, onPanelStyleUpdate, iteration, onIterationChange, defaultDragMode, onDragModeChange, occurrence, onOccurrenceUpdate, currentViewType, onViewTypeChange }) {
   const v = ensureLockDefaults(value);
   const iter = iteration || { mode: "inherit", timeFilter: "daily" };
 
@@ -304,13 +344,8 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
   const lockEnabled = !!v?.lock?.enabled;
 
   return (
-    <div className="font-mono max-h-[70vh] overflow-y-auto pr-2">
-      <div>
-        <h4 className="text-sm font-semibold text-white">Panel Settings</h4>
-        <p className="text-[11px] pt-[2px] text-foregroundScale-2">
-          Configure list layout + scroll behavior.
-        </p>
-      </div>
+    <div className="font-mono max-h-[70vh] overflow-y-auto pr-1 text-xs space-y-2">
+      <h4 className="text-sm font-semibold text-white">Panel Settings</h4>
 
       {/* Name */}
 <FormInput
@@ -333,7 +368,51 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
   onChange={(next) => onChange?.(ensureLockDefaults(next))}
 />
 
+      {/* View Type */}
+      {onViewTypeChange && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-muted-foreground font-semibold uppercase">View Type</label>
+          <select
+            value={currentViewType || "list"}
+            onChange={onViewTypeChange}
+            className="w-full text-xs bg-muted border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+          >
+            <option value="list">List</option>
+            <option value="notebook">Notebook</option>
+            <option value="artifact-viewer">Artifact Viewer</option>
+            <option value="doc-viewer">Doc Viewer</option>
+            <option value="file-manager">File Manager</option>
+          </select>
+        </div>
+      )}
 
+      <Separator />
+
+      {/* Child Container Style Defaults */}
+      <StyleEditor
+        styleMode={panel?.childContainerStyle ? "own" : "inherit"}
+        ownStyle={panel?.childContainerStyle}
+        onStyleModeChange={(mode) => {
+          if (mode === "inherit") onPanelStyleUpdate?.({ childContainerStyle: null });
+        }}
+        onOwnStyleChange={(style) => onPanelStyleUpdate?.({ childContainerStyle: style })}
+        label="Container Defaults"
+        inheritLabel="Theme"
+      />
+
+      <Separator />
+
+      {/* Child Instance Style Defaults */}
+      <StyleEditor
+        styleMode={panel?.childInstanceStyle ? "own" : "inherit"}
+        ownStyle={panel?.childInstanceStyle}
+        onStyleModeChange={(mode) => {
+          if (mode === "inherit") onPanelStyleUpdate?.({ childInstanceStyle: null });
+        }}
+        onOwnStyleChange={(style) => onPanelStyleUpdate?.({ childInstanceStyle: style })}
+        label="Instance Defaults"
+        inheritLabel="Theme"
+      />
 
       <Separator />
 
@@ -371,7 +450,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
           <span className="text-[10px] opacity-70">Drag/drop permissions</span>
         </div>
 
-        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="mt-2 grid grid-cols-2 gap-2">
           <FormInput
             schema={{
               type: "toggle",
@@ -392,7 +471,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
 
         <div
           className={cn(
-            "mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3",
+            "mt-2 grid grid-cols-2 gap-2",
             !lockEnabled && "opacity-60"
           )}
         >
@@ -463,7 +542,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
           <span className="text-[10px] opacity-70">Time-based filtering</span>
         </div>
 
-        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="mt-2 grid grid-cols-2 gap-2">
           <FormInput
             schema={{
               type: "select",
@@ -518,6 +597,22 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
 
       <Separator />
 
+      {/* Persistence Mode (occurrence-level) */}
+      {occurrence && (
+        <>
+          <div className="pt-2">
+            <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Persistence</h4>
+            <IterationSettings
+              occurrence={occurrence}
+              onUpdate={onOccurrenceUpdate}
+              entityType="panel"
+              compact
+            />
+          </div>
+          <Separator />
+        </>
+      )}
+
       {/* ✅ Presets (button uses TooltipHelp for description) */}
       <div className="pt-2">
         <div className="flex items-center justify-between">
@@ -526,7 +621,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
         </div>
 
         <TooltipProvider>
-          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <div className="mt-2 grid grid-cols-3 gap-1">
             {LAYOUT_PRESETS.map((p) => {
               const Icon = p.Icon;
               const isActive = v?.presetId === p.id;
@@ -675,7 +770,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
 
       <Separator />
       {/* WIDTH */}
-      <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid pt-[5px] grid-cols-2 gap-2">
         <FormInput
           schema={{
             type: "select",
@@ -736,7 +831,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
       </div>
 
       {/* HEIGHT */}
-      <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid pt-[5px] grid-cols-2 gap-2">
         <FormInput
           schema={{
             type: "select",
@@ -853,7 +948,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
 
       <Separator />
 
-      <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid pt-[5px] grid-cols-2 gap-2">
         {/* Grid + Columns: Columns */}
         {isGridLike && (
           <FormInput
@@ -976,7 +1071,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
       <Separator />
 
       {/* Insets / Padding / Variant */}
-      <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid pt-[5px] grid-cols-2 gap-2">
         <FormInput
           schema={{
             type: "select",
@@ -1024,7 +1119,7 @@ export default function LayoutForm({ value, onChange, onCommit, onDeletePanel, p
       <Separator />
 
       {/* Scroll */}
-      <div className="grid pt-[5px] grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid pt-[5px] grid-cols-2 gap-2">
         <FormInput
           schema={{
             type: "select",

@@ -11,16 +11,19 @@ const PanelSchema = new mongoose.Schema(
 
     // Occurrences in this panel (array of occurrence IDs)
     occurrences: { type: [String], default: [] },
-    kind: { type: String, enum: ["board", "doc", "mixed"], default: "board" },
+    kind: { type: String, enum: ["board", "doc", "mixed", "notebook", "artifact-viewer"], default: "board" },
+
+    // Reference to View model (determines how panel renders)
+    viewId: { type: String, default: null },
 
     // Iteration settings (inherit from grid or own)
     iteration: {
       mode: { type: String, enum: ["inherit", "own"], default: "inherit" },
-      timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly"], default: "daily" },
+      timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly", "all"], default: "daily" },
     },
 
     // Default drag mode for this panel
-    defaultDragMode: { type: String, enum: ["move", "copy"], default: "move" },
+    defaultDragMode: { type: String, enum: ["move", "copy", "copylink"], default: "move" },
 
     // Fields exposed in this panel
     fieldIds: { type: [String], default: [] },
@@ -30,6 +33,13 @@ const PanelSchema = new mongoose.Schema(
 
     // ✅ NEW: persisted list layout settings
     layout: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Cascading style overrides — defaults for children
+    childContainerStyle: { type: mongoose.Schema.Types.Mixed, default: null },
+    childInstanceStyle: { type: mongoose.Schema.Types.Mixed, default: null },
+
+    // Sibling links (for future features like Q&A pairs, linked fields, etc.)
+    siblingLinks: { type: [String], default: [] },
   },
   { timestamps: true }
 );

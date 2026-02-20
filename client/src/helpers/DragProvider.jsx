@@ -78,7 +78,7 @@ export function DragProvider({
   const [activePayload, setActivePayload] = useState(null);
   const [hotTarget, setHotTarget] = useState(null);
   const [panelOverCellId, setPanelOverCellId] = useState(null);
-  // Copy vs Move mode: 'move' = move occurrence, 'copy' = create new occurrence
+  // Drag mode: 'move' | 'copy' | 'copylink'
   const [dragMode, setDragMode] = useState('move');
 
   const activeType = activePayload?.type || null;
@@ -206,19 +206,21 @@ export function DragProvider({
 
     s.dragging = true;
     s.payload = payload;
+    s.mode = mode; // Store mode in session ref for immediate access in drop handlers
     s.startPanels = deepClonePanels(basePanels);
     s.startContainers = deepCloneContainers(baseContainers);
     s.draftPanels = deepClonePanels(basePanels);
     s.draftContainers = deepCloneContainers(baseContainers);
 
     setActivePayload(payload);
-    setDragMode(mode); // Set initial drag mode (move or copy)
+    setDragMode(mode); // Also set state for UI updates
   }, [basePanels, baseContainers]);
 
   const clearSession = useCallback(() => {
     const s = sessionRef.current;
     s.dragging = false;
     s.payload = null;
+    s.mode = 'move'; // Reset mode to default
     s.startPanels = null;
     s.startContainers = null;
     s.draftPanels = null;
@@ -282,9 +284,9 @@ export function DragProvider({
   // ============================================================
   // DRAG HANDLERS
   // ============================================================
-  // Toggle drag mode between copy and move
+  // Cycle drag mode: move → copy → copylink → move
   const toggleDragMode = useCallback(() => {
-    setDragMode(prev => prev === 'move' ? 'copy' : 'move');
+    setDragMode(prev => prev === 'move' ? 'copy' : prev === 'copy' ? 'copylink' : 'move');
   }, []);
 
   const handleDragStart = useCallback((payload, clientX, clientY, options = {}) => {
@@ -614,22 +616,33 @@ export function DragProvider({
           const newContainer = {
             id: newContainerId,
             label: sourceContainer.label || "Container",
-            items: newInstanceIds,
+            occurrences: newInstanceIds,
           };
           CommitHelpers.createContainer({ dispatch, socket, container: newContainer, emit: true });
         });
 
-        // Create the panel with copied containers
+        // Create the panel (without row/col - that's in occurrence.placement)
         const newPanel = {
           id: newPanelId,
-          row: cell.row,
-          col: cell.col,
-          width: sourcePanel?.width || 1,
-          height: sourcePanel?.height || 1,
           containers: newContainerIds,
           layout: sourcePanel?.layout || {},
         };
-        CommitHelpers.createPanel({ dispatch, socket, panel: newPanel, emit: true });
+
+        // Create panel with occurrence in grid (handles placement)
+        LayoutHelpers.createPanelInGrid({
+          dispatch,
+          socket,
+          grid: state?.grid,
+          panel: newPanel,
+          placement: {
+            row: cell.row,
+            col: cell.col,
+            width: sourcePanel?.width || 1,
+            height: sourcePanel?.height || 1,
+          },
+          userId: state?.userId,
+          emit: true,
+        });
 
         // Handle stack visibility for destination cell
         const destStack = baseAllPanels.filter((p) => p.row === cell.row && p.col === cell.col);
@@ -642,11 +655,29 @@ export function DragProvider({
           const fromRow = panel.row, fromCol = panel.col;
           const toRow = cell.row, toCol = cell.col;
 
-          // Move panel and ensure it's visible in new position
-          const movedPanel = {
+          // Update occurrence placement (the source of truth for panel position)
+          const occurrenceId = panel._occurrenceId;
+          const occurrence = occurrenceId ? occurrencesById[occurrenceId] : null;
+
+          if (occurrence) {
+            // Update the occurrence's placement
+            CommitHelpers.updateOccurrence({
+              dispatch, socket,
+              occurrence: {
+                ...occurrence,
+                placement: {
+                  ...(occurrence.placement || {}),
+                  row: toRow,
+                  col: toCol,
+                },
+              },
+              emit: true,
+            });
+          }
+
+          // Also update panel layout to ensure it's visible
+          const updatedPanel = {
             ...panel,
-            row: toRow,
-            col: toCol,
             layout: {
               ...(panel.layout || {}),
               style: {
@@ -657,7 +688,7 @@ export function DragProvider({
           };
           CommitHelpers.updatePanel({
             dispatch, socket,
-            panel: movedPanel,
+            panel: updatedPanel,
             emit: true,
           });
 
@@ -744,6 +775,7 @@ export function DragProvider({
           dispatch, socket, gridId,
           panel: targetPanel,
           container: newContainer,
+          userId: state?.userId,
           index: toIndex,
           emit: true,
         });
@@ -763,6 +795,7 @@ export function DragProvider({
             dispatch, socket, gridId,
             container: { ...newContainer, id: newContainerId },
             instance: newInstance,
+            userId: state?.userId,
             emit: true,
           });
         });
@@ -828,10 +861,27 @@ export function DragProvider({
           // Get gridId for creating new occurrences
           const gridId = state?.gridId || state?.grid?._id;
 
-          // Check if we're in copy mode
-          const isCopyMode = dragMode === 'copy';
+          // Check if we're in copy mode - use session ref for immediate access
+          const isCopyMode = sessionRef.current.mode === 'copy';
+          const samePanel = fromPanel.id === toPanel.id;
 
-          if (isCopyMode) {
+          if (isCopyMode && samePanel) {
+            // Same panel + copy = just reorder, don't duplicate
+            const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+              draggedContainerId,
+              fromPanel.occurrences || [],
+              occurrencesById
+            );
+            if (fromIndex !== -1) {
+              const finalToIndex = toIndex !== null ? toIndex : (fromPanel.occurrences || []).length;
+              if (fromIndex !== finalToIndex) {
+                LayoutHelpers.reorderContainersInPanel({
+                  dispatch, socket, panel: fromPanel,
+                  fromIndex, toIndex: finalToIndex, emit: true,
+                });
+              }
+            }
+          } else if (isCopyMode) {
             // COPY MODE: Create new occurrence for the container in target panel
             // Source occurrence remains intact
             LayoutHelpers.copyContainerToPanel({
@@ -840,6 +890,7 @@ export function DragProvider({
               gridId,
               sourceContainerId: draggedContainerId,
               toPanel,
+              userId: state?.userId,
               toIndex,
               emit: true,
             });
@@ -895,6 +946,12 @@ export function DragProvider({
       const toC = baseContainers.find((c) => c.id === containerId);
 
       if (fromC && toC) {
+        // If target is a doc container, skip normal move/copy — DocContainer handles pill insertion
+        if (toC.kind === "doc") {
+          clearSession();
+          return;
+        }
+
         // Find the occurrence ID for the dragged instance
         const draggedInstanceId = payload.id;
         const occurrenceId = LayoutHelpers.findOccurrenceIdByTarget(
@@ -952,21 +1009,89 @@ export function DragProvider({
         // Get gridId for creating new occurrences
         const gridId = state?.gridId || state?.grid?._id;
 
-        // Check if we're in copy mode
-        const isCopyMode = dragMode === 'copy';
+        // Get current iteration date for new occurrences
+        const grid = state?.grid;
+        const iterations = grid?.iterations || [];
+        const selectedIterationId = state?.selectedIterationId || grid?.selectedIterationId || "default";
+        const selectedIteration = iterations.find(i => i.id === selectedIterationId) || iterations[0];
+        const currentIterationDate = state?.currentIterationValue || selectedIteration?.currentDate || new Date();
 
-        if (isCopyMode) {
+        // Check drag mode - use session ref for immediate access
+        const isCopyMode = sessionRef.current.mode === 'copy';
+        const isCopylinkMode = sessionRef.current.mode === 'copylink';
+
+        // If copy/copylink drops in the SAME container, treat as a move (reorder)
+        const sameContainer = fromC.id === toC.id;
+
+        if ((isCopylinkMode || isCopyMode) && sameContainer) {
+          // Same container + copy/copylink = just reorder, don't duplicate
+          const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
+            draggedInstanceId,
+            fromC.occurrences || [],
+            occurrencesById
+          );
+          if (fromIndex !== -1) {
+            const finalToIndex = toIndex !== null ? toIndex : (fromC.occurrences || []).length;
+            if (fromIndex !== finalToIndex) {
+              LayoutHelpers.reorderInstancesInContainer({
+                dispatch, socket, container: fromC,
+                fromIndex, toIndex: finalToIndex, emit: true,
+              });
+            }
+          }
+        } else if (isCopylinkMode) {
+          // COPYLINK MODE: Create a linked occurrence — field edits propagate to all linked
+          LayoutHelpers.copylinkInstanceToContainer({
+            dispatch,
+            socket,
+            gridId,
+            sourceInstanceId: draggedInstanceId,
+            sourceOccurrenceId: occurrenceId,
+            toContainer: toC,
+            userId: state?.userId,
+            toIndex,
+            emit: true,
+            iterationMode: "specific",
+            iterationValue: currentIterationDate,
+            sourceOccurrence: occurrenceId ? occurrencesById[occurrenceId] : null,
+          });
+        } else if (isCopyMode) {
           // COPY MODE: Create a new occurrence in the target container
-          // Source occurrence remains intact
-          LayoutHelpers.copyInstanceToContainer({
+          // New occurrence is "specific" to current iteration (not persistent)
+          // This allows templates to stay in toolkit while copies appear on schedule
+          const copyResult = LayoutHelpers.copyInstanceToContainer({
             dispatch,
             socket,
             gridId,
             sourceInstanceId: draggedInstanceId,
             toContainer: toC,
+            userId: state?.userId,
             toIndex,
             emit: true,
+            iterationMode: "specific",  // Copies are specific to this date
+            iterationValue: currentIterationDate,
+            sourceOccurrence: occurrenceId ? occurrencesById[occurrenceId] : null,
           });
+
+          // Auto-check boolean fields on drop
+          const droppedInstance = (state?.instances || []).find(i => i.id === draggedInstanceId);
+          if (droppedInstance?.meta?.autoCheckOnDrop && copyResult?.occurrence?.id) {
+            const boolBindings = (droppedInstance.fieldBindings || []).filter(b => {
+              const field = (state?.fields || []).find(f => f.id === b.fieldId);
+              return field?.type === "boolean";
+            });
+            if (boolBindings.length > 0) {
+              const autoFields = {};
+              boolBindings.forEach(b => {
+                autoFields[b.fieldId] = { value: true, flow: "in" };
+              });
+              CommitHelpers.updateOccurrence({
+                dispatch, socket,
+                occurrence: { id: copyResult.occurrence.id, fields: autoFields },
+                emit: true,
+              });
+            }
+          }
         } else if (fromC.id === toC.id) {
           // MOVE MODE: Same container - reorder
           const fromIndex = LayoutHelpers.getTargetIndexInOccurrences(
@@ -998,6 +1123,26 @@ export function DragProvider({
             toIndex,
             emit: true,
           });
+
+          // Auto-check boolean fields on move drop
+          const movedInstance = (state?.instances || []).find(i => i.id === draggedInstanceId);
+          if (movedInstance?.meta?.autoCheckOnDrop && occurrenceId) {
+            const boolBindings = (movedInstance.fieldBindings || []).filter(b => {
+              const field = (state?.fields || []).find(f => f.id === b.fieldId);
+              return field?.type === "boolean";
+            });
+            if (boolBindings.length > 0) {
+              const autoFields = {};
+              boolBindings.forEach(b => {
+                autoFields[b.fieldId] = { value: true, flow: "in" };
+              });
+              CommitHelpers.updateOccurrence({
+                dispatch, socket,
+                occurrence: { id: occurrenceId, fields: autoFields },
+                emit: true,
+              });
+            }
+          }
         }
       }
     }
@@ -1071,6 +1216,7 @@ export function DragProvider({
         dispatch, socket, gridId,
         container,
         instance: { id, label },
+        userId: state?.userId,
         index: toIndex,
         emit: true,
       });
@@ -1145,6 +1291,7 @@ export function DragProvider({
           dispatch, socket, gridId,
           container,
           instance: { id, label },
+          userId: state?.userId,
           index: toIndex,
           emit: true,
         });
@@ -1254,6 +1401,7 @@ export function DragProvider({
     toggleDragMode,
     isCopyMode: dragMode === 'copy',
     isMoveMode: dragMode === 'move',
+    isCopylinkMode: dragMode === 'copylink',
 
     // Booleans
     isPanelDrag: activeType === DragType.PANEL,

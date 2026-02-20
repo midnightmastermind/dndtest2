@@ -32,6 +32,13 @@ export function masterReducer(state, action) {
                 instances = [],
                 occurrences = [],
                 fields = [],
+
+                // new models
+                manifests = [],
+                views = [],
+                docs = [],
+                folders = [],
+                artifacts = [],
             } = action.payload || {};
 
             return {
@@ -44,6 +51,11 @@ export function masterReducer(state, action) {
                 instances: instances || [],
                 occurrences: occurrences || [],
                 fields: fields || [],
+                manifests: manifests || [],
+                views: views || [],
+                docs: docs || [],
+                folders: folders || [],
+                artifacts: artifacts || [],
                 hydrated: true,
             };
         }
@@ -75,6 +87,11 @@ export function masterReducer(state, action) {
                 instances: [],
                 occurrences: [],
                 fields: [],
+                manifests: [],
+                views: [],
+                docs: [],
+                folders: [],
+                artifacts: [],
                 hydrated: false,
             };
         }
@@ -211,6 +228,7 @@ export function masterReducer(state, action) {
                 containers: [
                     ...(state.containers || []),
                     {
+                        ...container,
                         id,
                         label: container.label ?? "Untitled",
                         occurrences: Array.isArray(container.occurrences) ? container.occurrences : [],
@@ -232,11 +250,9 @@ export function masterReducer(state, action) {
             };
         }
 
-        case ActionTypes.UPDATE_CONTAINER_ITEMS: {
-            // bindSocketToStore dispatches { containerId, items }
-            // Note: "items" is backward compat - actually contains occurrence IDs
+        case ActionTypes.UPDATE_CONTAINER_OCCURRENCES: {
             const containerId = action.payload?.containerId;
-            const items = action.payload?.items; // Actually occurrence IDs
+            const items = action.payload?.occurrences || action.payload?.items; // Support both during migration
             if (!containerId || !Array.isArray(items)) return state;
 
             return {
@@ -383,6 +399,111 @@ export function masterReducer(state, action) {
                 ...state,
                 fields: (state.fields || []).filter((f) => f.id !== fieldId),
             };
+        }
+
+        // ======================================================
+        // MANIFESTS
+        // ======================================================
+        case ActionTypes.CREATE_MANIFEST:
+        case ActionTypes.UPDATE_MANIFEST: {
+            const manifest = action.payload?.manifest ?? action.payload;
+            if (!manifest?.id) return state;
+            const exists = (state.manifests || []).some((m) => m.id === manifest.id);
+            return {
+                ...state,
+                manifests: exists
+                    ? state.manifests.map((m) => (m.id === manifest.id ? { ...m, ...manifest } : m))
+                    : [...(state.manifests || []), manifest],
+            };
+        }
+        case ActionTypes.DELETE_MANIFEST: {
+            const manifestId = action.payload?.manifestId ?? action.payload;
+            if (!manifestId) return state;
+            return { ...state, manifests: (state.manifests || []).filter((m) => m.id !== manifestId) };
+        }
+
+        // ======================================================
+        // VIEWS
+        // ======================================================
+        case ActionTypes.CREATE_VIEW:
+        case ActionTypes.UPDATE_VIEW: {
+            const view = action.payload?.view ?? action.payload;
+            if (!view?.id) return state;
+            const exists = (state.views || []).some((v) => v.id === view.id);
+            return {
+                ...state,
+                views: exists
+                    ? state.views.map((v) => (v.id === view.id ? { ...v, ...view } : v))
+                    : [...(state.views || []), view],
+            };
+        }
+        case ActionTypes.DELETE_VIEW: {
+            const viewId = action.payload?.viewId ?? action.payload;
+            if (!viewId) return state;
+            return { ...state, views: (state.views || []).filter((v) => v.id !== viewId) };
+        }
+
+        // ======================================================
+        // DOCS
+        // ======================================================
+        case ActionTypes.CREATE_DOC:
+        case ActionTypes.UPDATE_DOC: {
+            const doc = action.payload?.doc ?? action.payload;
+            if (!doc?.id) return state;
+            const exists = (state.docs || []).some((d) => d.id === doc.id);
+            return {
+                ...state,
+                docs: exists
+                    ? state.docs.map((d) => (d.id === doc.id ? { ...d, ...doc } : d))
+                    : [...(state.docs || []), doc],
+            };
+        }
+        case ActionTypes.DELETE_DOC: {
+            const docId = action.payload?.docId ?? action.payload;
+            if (!docId) return state;
+            return { ...state, docs: (state.docs || []).filter((d) => d.id !== docId) };
+        }
+
+        // ======================================================
+        // FOLDERS
+        // ======================================================
+        case ActionTypes.CREATE_FOLDER:
+        case ActionTypes.UPDATE_FOLDER: {
+            const folder = action.payload?.folder ?? action.payload;
+            if (!folder?.id) return state;
+            const exists = (state.folders || []).some((f) => f.id === folder.id);
+            return {
+                ...state,
+                folders: exists
+                    ? state.folders.map((f) => (f.id === folder.id ? { ...f, ...folder } : f))
+                    : [...(state.folders || []), folder],
+            };
+        }
+        case ActionTypes.DELETE_FOLDER: {
+            const folderId = action.payload?.folderId ?? action.payload;
+            if (!folderId) return state;
+            return { ...state, folders: (state.folders || []).filter((f) => f.id !== folderId) };
+        }
+
+        // ======================================================
+        // ARTIFACTS
+        // ======================================================
+        case ActionTypes.CREATE_ARTIFACT:
+        case ActionTypes.UPDATE_ARTIFACT: {
+            const artifact = action.payload?.artifact ?? action.payload;
+            if (!artifact?.id) return state;
+            const exists = (state.artifacts || []).some((a) => a.id === artifact.id);
+            return {
+                ...state,
+                artifacts: exists
+                    ? state.artifacts.map((a) => (a.id === artifact.id ? { ...a, ...artifact } : a))
+                    : [...(state.artifacts || []), artifact],
+            };
+        }
+        case ActionTypes.DELETE_ARTIFACT: {
+            const artifactId = action.payload?.artifactId ?? action.payload;
+            if (!artifactId) return state;
+            return { ...state, artifacts: (state.artifacts || []).filter((a) => a.id !== artifactId) };
         }
 
         // ======================================================

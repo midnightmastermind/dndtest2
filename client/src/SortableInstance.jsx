@@ -13,9 +13,12 @@ function SortableInstance({
   occurrence,
   containerId,
   panelId,
+  panel,
+  container,
   dispatch,
   socket,
   allowedEdges = ['top', 'bottom'], // Default to vertical layout
+  onInstanceFocus,
 }) {
   // ============================================================
   // CONTEXT
@@ -32,8 +35,8 @@ function SortableInstance({
   const { ref, isDragging, isOver, closestEdge, props } = useDragDrop({
     type: DragType.INSTANCE,
     id: instance.id,
-    data: instance,
-    context: { containerId, panelId, instanceId: instance.id },
+    data: { ...instance, occurrence },  // Include occurrence for field values
+    context: { containerId, panelId, instanceId: instance.id, occurrenceId: occurrence?.id },
     disabled: isContainerDrag,
     nativeEnabled: true,
     accepts: DropAccepts.INSTANCE,
@@ -47,6 +50,8 @@ function SortableInstance({
     <div
       ref={ref}
       data-instance-id={instance.id}
+      data-occurrence-id={occurrence?.id}
+      tabIndex={0}
       className="no-select instance-wrap"
       style={{
         touchAction: "none",
@@ -125,8 +130,11 @@ function SortableInstance({
         label={instance.label}
         instance={instance}
         occurrence={occurrence}
+        panel={panel}
+        container={container}
         dispatch={dispatch}
         socket={socket}
+        onDoubleClick={onInstanceFocus ? () => onInstanceFocus(instance, occurrence) : undefined}
       />
     </div>
   );

@@ -15,6 +15,9 @@ import React, {
 
 import Panel from "./Panel";
 import FullscreenOverlay from "./ui/FullscreenOverlay";
+import GridFieldsBank from "./ui/GridFieldsBank";
+import GridRadialMenu from "./ui/GridRadialMenu";
+import { useAnimations } from "./hooks/useAnimations";
 
 import { GridDataContext } from "./GridDataContext";
 import { GridActionsContext } from "./GridActionsContext";
@@ -22,6 +25,7 @@ import { GridActionsContext } from "./GridActionsContext";
 import { DragProvider } from "./helpers/DragProvider";
 import { useDragContext, useDroppable, DragType, DropAccepts } from "./helpers/dragSystem";
 import * as CommitHelpers from "./helpers/CommitHelpers";
+import { getGridPanels } from "./state/selectors";
 
 // ============================================================
 // GRID CELL - Drop zone for panels
@@ -249,23 +253,72 @@ function GridInner({ components }) {
   const [dragTick, setDragTick] = useState(0);
   const onTick = useCallback(() => setDragTick((x) => x + 1), []);
 
+  // Fields Bank dialog state
+  const [fieldsBankOpen, setFieldsBankOpen] = useState(false);
+
   const {
     dispatch,
     socket,
     addContainerToPanel,
     addInstanceToContainer,
+    createField,
+    updateField,
+    deleteField,
+    // Undo/Redo state (lifted to App.jsx, accessed via context)
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    isProcessing,
   } = useContext(GridActionsContext);
 
   const grid = state.grid;
   const gridId = grid?._id;
+
+  // Animation hook for FLIP animations on undo/redo
+  const { animateUndoMoves, capturePositions } = useAnimations();
+
+  // Listen for undo_result socket events to trigger animations
+  // (useUndoRedo is now in App.jsx, so we wire animations via socket directly)
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleUndoResultAnimation = ({ success, reversedOps, animate }) => {
+      if (success && animate && reversedOps) {
+        const moveOps = reversedOps.filter(op => op.type === "move_back");
+        if (moveOps.length > 0) {
+          animateUndoMoves(moveOps);
+        }
+      }
+    };
+
+    socket.on("undo_result", handleUndoResultAnimation);
+    return () => socket.off("undo_result", handleUndoResultAnimation);
+  }, [socket, animateUndoMoves]);
   const rows = grid?.rows ?? 1;
   const cols = grid?.cols ?? 1;
 
   const gridRef = useRef(null);
 
+  // Get panel occurrences with placement data from the grid
   const visiblePanels = useMemo(() => {
-    return (state.panels || []).filter((p) => p.gridId === gridId);
-  }, [state.panels, gridId]);
+    const panelOccurrences = getGridPanels(state);
+
+    // Map occurrences to panels with placement merged in
+    return panelOccurrences
+      .filter(occ => occ.targetType === "panel" && occ.panel)
+      .map(occ => ({
+        ...occ.panel,
+        // Use placement from occurrence (the source of truth for position)
+        row: occ.placement?.row ?? occ.panel?.row ?? 0,
+        col: occ.placement?.col ?? occ.panel?.col ?? 0,
+        width: occ.placement?.width ?? 1,
+        height: occ.placement?.height ?? 1,
+        // Keep occurrence reference for updates
+        _occurrenceId: occ.id,
+        _occurrence: occ,
+      }));
+  }, [state]);
 
   // Defensive: Ensure at least one panel per cell is visible
   useEffect(() => {
@@ -510,6 +563,31 @@ function GridInner({ components }) {
         cols={cols}
         rows={rows}
       />
+
+      {/* Grid Radial Menu - Undo/Redo/Fields (History moved to Toolbar) */}
+      <GridRadialMenu
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo && !isProcessing}
+        canRedo={canRedo && !isProcessing}
+        onFields={() => setFieldsBankOpen(true)}
+        disabled={isProcessing}
+      />
+
+      {/* Grid Fields Bank Dialog */}
+      <GridFieldsBank
+        open={fieldsBankOpen}
+        onOpenChange={setFieldsBankOpen}
+        gridId={gridId}
+        fields={state.fields || []}
+        panels={state.panels || []}
+        containers={state.containers || []}
+        instances={state.instances || []}
+        onCreateField={createField}
+        onUpdateField={updateField}
+        onDeleteField={deleteField}
+      />
+
     </DragProvider>
   );
 }

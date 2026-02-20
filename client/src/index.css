@@ -1,7 +1,11 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
+@layer base {
+  *, ::before, ::after {
+    border-color: hsl(var(--border));
+  }
+}
 /* --- Global reset & non-scroll root --- */
 html,
 body,
@@ -590,4 +594,43 @@ html.dark {
 
 .panel-card {
   width: calc(100% - 4px)
+}
+
+/* Doc editor: smaller text, pill-friendly spacing */
+.doc-editor-content.ProseMirror {
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* Obsidian-style heading markers — show # prefix only when cursor is on that heading */
+.doc-editor-content.ProseMirror h1 { font-size: 1.5em; }
+.doc-editor-content.ProseMirror h2 { font-size: 1.25em; }
+.doc-editor-content.ProseMirror h3 { font-size: 1.1em; }
+.doc-editor-content.ProseMirror h1::before,
+.doc-editor-content.ProseMirror h2::before,
+.doc-editor-content.ProseMirror h3::before { content: ""; }
+.doc-editor-content.ProseMirror h1.heading-focused::before { content: "# "; opacity: 0.35; font-weight: normal; }
+.doc-editor-content.ProseMirror h2.heading-focused::before { content: "## "; opacity: 0.35; font-weight: normal; }
+.doc-editor-content.ProseMirror h3.heading-focused::before { content: "### "; opacity: 0.35; font-weight: normal; }
+.doc-editor-content.ProseMirror p { margin: 0.25em 0; }
+.doc-editor-content.ProseMirror ul,
+.doc-editor-content.ProseMirror ol { margin: 0.25em 0; padding-left: 1.25em; }
+.doc-editor-content.ProseMirror ul { list-style-type: disc; }
+.doc-editor-content.ProseMirror ol { list-style-type: decimal; }
+.doc-editor-content.ProseMirror li { margin: 0.1em 0; }
+.doc-editor-content.ProseMirror li::marker { color: rgba(255,255,255,0.5); }
+.doc-editor-content.ProseMirror .instance-pill,
+.doc-editor-content.ProseMirror .field-pill {
+  display: inline-flex;
+  vertical-align: baseline;
+}
+/* Block pills take full width */
+.doc-editor-content.ProseMirror .instance-pill.block-pill {
+  display: block;
+}
+.doc-editor-content.ProseMirror .is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
 }

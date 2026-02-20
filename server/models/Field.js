@@ -8,6 +8,9 @@ const FieldSchema = new mongoose.Schema(
 
     userId: { type: String, required: true, index: true },
 
+    // Grid this field belongs to (fields are grid-level entities)
+    gridId: { type: String, required: true, index: true },
+
     // Field name
     name: { type: String, required: true, trim: true },
 
@@ -15,7 +18,7 @@ const FieldSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ["number", "text", "boolean", "select", "date"],
+      enum: ["number", "text", "boolean", "select", "date", "rating", "duration"],
       default: "text"
     },
 
@@ -30,34 +33,65 @@ const FieldSchema = new mongoose.Schema(
       default: "input"
     },
 
-    // Calculation/metric definition (only used when mode = "derived")
-    // This will be fully implemented in Phase 2
+    // Calculation/metric definition (for derived fields AND input field automations)
+    // This is where OperationsBuilder block trees live
     metric: {
       source: { type: String, enum: ["transactions", "occurrences"] },
-      fieldId: { type: String },  // Source field to aggregate
+      fieldId: { type: String },  // Legacy: Source field to aggregate
       instanceIds: { type: [String], default: [] },  // Optional filter by instance types
-      aggregation: { type: String, enum: ["sum", "count", "countTrue", "avg", "min", "max", "last"] },
+      aggregation: { type: String, enum: ["sum", "count", "countTrue", "avg", "min", "max", "last", "first", "range", "median", "mode", "stdDev", "product", "concat", "unique", "random"] },
       scope: { type: String, enum: ["grid", "panel", "container", "custom"] },
       window: { type: String, enum: ["day", "week", "month", "year", "iteration", "all"] },
       target: {
         value: { type: mongoose.Schema.Types.Mixed },
         op: { type: String, enum: [">=", "<=", "==", "!=", ">", "<"] },
-        // Base time filter for the target (e.g., "daily" means target is per day)
-        // When viewing weekly, a daily target of 3 becomes 21
         timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly", "inherit"] }
       },
-      // Source field time filter - "inherit" uses parent iteration
       timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly", "inherit", "all"] },
-      // Allowed source fields with their flow filters and destinations
       allowedFields: [{
         fieldId: { type: String },
         flowFilter: { type: String, enum: ["any", "in", "out"], default: "any" },
         destinations: [{ type: mongoose.Schema.Types.Mixed }]
-      }]
+      }],
+      // Visual block tree for Snap!-style calculation editor
+      blockTree: { type: mongoose.Schema.Types.Mixed }
     },
 
-    // Optional metadata
+    // Context conditions - when should this field be active/visible
+    // Used for conditional calculations based on where occurrence is dropped
+    conditions: {
+      // Block tree for conditions (uses same OperationsBuilder format)
+      // e.g., "when dropped in panel X" or "when field Y equals Z"
+      blockTree: { type: mongoose.Schema.Types.Mixed },
+      // Quick filters (alternative to block tree for simple conditions)
+      panelIds: { type: [String], default: [] },      // Only active in these panels
+      containerIds: { type: [String], default: [] },  // Only active in these containers
+      instanceIds: { type: [String], default: [] },   // Only active for these instance types
+    },
+
+    // Triggers - automations that fire on events
+    triggers: [{
+      event: { type: String, enum: ["onDrop", "onChange", "onComplete"] },
+      // Block tree for the trigger action
+      blockTree: { type: mongoose.Schema.Types.Mixed },
+      // Quick config for simple triggers
+      targetFieldId: { type: String },  // Field to modify
+      action: { type: String, enum: ["set", "increment", "decrement", "toggle"] },
+      value: { type: mongoose.Schema.Types.Mixed },
+    }],
+
+    // Display configuration (default display settings for this field)
+    display: {
+      role: { type: String, enum: ["input", "display", "both"], default: "input" },
+      showLabel: { type: Boolean, default: true },
+      order: { type: Number, default: 0 },
+    },
+
+    // Optional metadata (prefix, postfix, increment, select options, etc.)
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Sibling links (for future features like Q&A pairs, linked fields, etc.)
+    siblingLinks: { type: [String], default: [] },
   },
   {
     timestamps: true,
@@ -66,8 +100,9 @@ const FieldSchema = new mongoose.Schema(
 );
 
 // Indexes for queries
-FieldSchema.index({ userId: 1, name: 1 });
-FieldSchema.index({ mode: 1 });
+FieldSchema.index({ userId: 1, gridId: 1 });
+FieldSchema.index({ gridId: 1, name: 1 });
+FieldSchema.index({ gridId: 1, mode: 1 });
 
 // Hide Mongo internals in API responses
 FieldSchema.set("toJSON", {

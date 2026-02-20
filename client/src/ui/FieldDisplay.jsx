@@ -37,6 +37,8 @@ function FieldDisplay({
       return calculateDerivedField(state, field, context);
     }
 
+    // Extract raw value if stored as { value, flow } object (safety check)
+    if (value && typeof value === "object" && "value" in value) return value.value;
     return value;
   }, [field, value, state, context]);
 
@@ -83,6 +85,22 @@ function FieldDisplay({
         return option?.label ?? displayValue;
       }
 
+      case "rating": {
+        // Return numeric for processing, render stars separately
+        return displayValue;
+      }
+
+      case "duration": {
+        // Value is in minutes, format as Xh Xm
+        const totalMinutes = Number(displayValue);
+        if (isNaN(totalMinutes)) return displayValue;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours === 0) return `${minutes}m`;
+        if (minutes === 0) return `${hours}h`;
+        return `${hours}h ${minutes}m`;
+      }
+
       default:
         return String(displayValue);
     }
@@ -95,10 +113,19 @@ function FieldDisplay({
     const labels = {
       sum: "Total",
       count: "Count",
+      countTrue: "Completed",
       avg: "Average",
       min: "Min",
       max: "Max",
       last: "Latest",
+      first: "First",
+      range: "Range",
+      median: "Median",
+      mode: "Mode",
+      stdDev: "Std Dev",
+      product: "Product",
+      concat: "Combined",
+      unique: "Unique",
     };
 
     return labels[field.metric.aggregation] || null;
@@ -137,9 +164,44 @@ function FieldDisplay({
   const showUnit = unit && binding?.display?.showUnit !== false;
 
   // ============================================================
+  // RATING STARS RENDERER
+  // ============================================================
+  const renderRatingStars = (rating, maxRating = 5, size = "w-4 h-4") => {
+    const current = Number(rating) || 0;
+    return (
+      <div className="flex items-center gap-0.5">
+        {Array.from({ length: maxRating }, (_, i) => i + 1).map((star) => (
+          <svg
+            key={star}
+            className={`${size} ${
+              star <= current
+                ? "text-yellow-400 fill-yellow-400"
+                : "text-gray-400 fill-transparent"
+            }`}
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        ))}
+      </div>
+    );
+  };
+
+  // ============================================================
   // COMPACT DISPLAY
   // ============================================================
   if (compact) {
+    // Rating compact display
+    if (field.type === "rating") {
+      return (
+        <div className="field-display field-display-compact">
+          {renderRatingStars(displayValue, field.meta?.max || 5, "w-3 h-3")}
+        </div>
+      );
+    }
+
     return (
       <div className="field-display field-display-compact flex items-center gap-1">
         <span className="text-xs font-medium">{formattedValue}</span>
@@ -153,6 +215,19 @@ function FieldDisplay({
   // ============================================================
   // FULL DISPLAY
   // ============================================================
+
+  // Rating full display
+  if (field.type === "rating") {
+    return (
+      <div className="field-display">
+        {showLabel && (
+          <div className="text-xs text-muted-foreground mb-0.5">{name}</div>
+        )}
+        {renderRatingStars(displayValue, field.meta?.max || 5, "w-5 h-5")}
+      </div>
+    );
+  }
+
   return (
     <div className="field-display">
       {showLabel && (

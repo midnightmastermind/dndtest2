@@ -19,16 +19,40 @@ import { createPortal } from "react-dom";
 import { Settings, Plus, Copy, Move } from "lucide-react";
 
 export default function RadialMenu({
+  // Standard drag handle props (used when items not provided)
   dragMode = "move",
   onToggleDragMode,
   onSettings,
   onAddChild,
   addLabel = "Item",
+
+  // Custom items mode - pass array of { icon, label, onClick, color }
+  items = null,
+
+  // Force menu to open in specific direction: 'left', 'right', 'down', 'up'
+  forceDirection = null,
+
+  // Custom handle content (icon component or element)
+  handleIcon = null,
+  handleTitle = null,
+
+  // Callback when open state changes
+  onOpenChange = null,
+
+  // Styling
   disabled = false,
   size = "sm",
   className = "",
+  handleClassName = "",
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, _setIsOpen] = useState(false);
+  const setIsOpen = useCallback((val) => {
+    _setIsOpen((prev) => {
+      const next = typeof val === "function" ? val(prev) : val;
+      if (next !== prev) onOpenChange?.(next);
+      return next;
+    });
+  }, [onOpenChange]);
 
   // outside-click should consider BOTH handle area and the portal area
   const menuRef = useRef(null);       // in-flow wrapper
@@ -43,16 +67,51 @@ export default function RadialMenu({
   // controls the "from -> to" animation after mount
   const [entered, setEntered] = useState(false);
 
-  // ✅ swing IN from the TOP (was -90, which could feel like bottom depending on your angles)
-  // Using +90 means the arc wrapper starts rotated "up" and swings down into place.
-  const startRot = 90;
+  // Screen edge detection - determines which direction to open the menu
+  const [openDirection, setOpenDirection] = useState(forceDirection || 'left');
+
+  // Dynamic start rotation based on open direction
+  const getStartRotation = (dir) => {
+    switch (dir) {
+      case 'left': return 90;
+      case 'right': return -90;
+      case 'down': return -90;
+      case 'up': return 90;
+      default: return 90;
+    }
+  };
+  const startRot = getStartRotation(openDirection);
 
   const updateAnchor = useCallback(() => {
     const el = handleRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setAnchor({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-  }, []);
+    const centerX = r.left + r.width / 2;
+    const centerY = r.top + r.height / 2;
+
+    // If direction is forced, skip auto-detection
+    if (forceDirection) {
+      setOpenDirection(forceDirection);
+      setAnchor({ x: centerX, y: centerY });
+      return;
+    }
+
+    // Screen edge detection - check if menu would go off screen
+    const menuRadius = 50; // approximate menu spread radius
+    const leftEdgeSpace = centerX;
+    const rightEdgeSpace = window.innerWidth - centerX;
+
+    // Open to the right if too close to left edge, otherwise default to left
+    if (leftEdgeSpace < menuRadius + 20) {
+      setOpenDirection('right');
+    } else if (rightEdgeSpace < menuRadius + 20) {
+      setOpenDirection('left');
+    } else {
+      setOpenDirection('left');
+    }
+
+    setAnchor({ x: centerX, y: centerY });
+  }, [forceDirection]);
 
   // Close menu when clicking outside (includes portal!)
   useEffect(() => {
@@ -153,36 +212,73 @@ export default function RadialMenu({
 
   const s = sizes[size] || sizes.sm;
 
-  // Mode indicator icon inside handle
-  const ModeIcon = dragMode === "copy" ? Copy : Move;
+  // Mode indicator icon inside handle (or custom icon)
+  const ModeIcon = handleIcon || (dragMode === "copy" ? Copy : Move);
+  const titleText = handleTitle || `${dragMode === "copy" ? "Copy" : "Move"} mode - Click for menu`;
 
-  // ✅ space buttons apart more (angles farther apart) + keep left-side arc
+  // Get angles based on direction and item count
+  const getAnglesForDirection = useCallback((direction, count) => {
+    // Spread items evenly in a 90-degree arc
+    const spread = 45; // degrees between items
+    const baseAngles = {
+      left: 180,    // center of left arc
+      right: 0,     // center of right arc
+      down: 90,     // center of bottom arc (90 = straight down)
+      up: 270,      // center of top arc
+    };
+    const base = baseAngles[direction] || 180;
+
+    // For 3 items: -45, 0, +45 from base
+    // For 4 items: -67.5, -22.5, +22.5, +67.5 from base
+    const angles = [];
+    const halfSpread = ((count - 1) * spread) / 2;
+    for (let i = 0; i < count; i++) {
+      angles.push(base - halfSpread + i * spread);
+    }
+    return angles;
+  }, []);
+
+  // ✅ Support custom items or default drag handle menu
   const menuItems = useMemo(
-    () => [
-      {
-        angle: 135, // upper-left (was 135)
-        icon: Settings,
-        label: "Settings",
-        onClick: onSettings,
-        color: "bg-slate-600 hover:bg-slate-500",
-      },
-      {
-        angle: 180, // left
-        icon: Plus,
-        label: `Add ${addLabel}`,
-        onClick: onAddChild,
-        color: "bg-emerald-600 hover:bg-emerald-500",
-      },
-      {
-        angle: 225, // lower-left (was -135)
-        icon: dragMode === "move" ? Copy : Move,
-        label: dragMode === "move" ? "Set to Copy" : "Set to Move",
-        onClick: onToggleDragMode,
-        // ✅ copy stays blue; move stays slate (matches handle)
-        color: dragMode === "move" ? "bg-blue-600 hover:bg-blue-500" : "bg-slate-600 hover:bg-slate-500",
-      },
-    ],
-    [addLabel, dragMode, onAddChild, onSettings, onToggleDragMode]
+    () => {
+      // If custom items provided, use those with calculated angles
+      if (items && items.length > 0) {
+        const angles = getAnglesForDirection(openDirection, items.length);
+        return items.map((item, i) => ({
+          ...item,
+          angle: angles[i],
+          color: item.color || "bg-slate-600 hover:bg-slate-500",
+        }));
+      }
+
+      // Default drag handle menu items
+      const angles = getAnglesForDirection(openDirection, 3);
+      return [
+        {
+          angle: angles[0],
+          icon: Settings,
+          label: "Settings",
+          onClick: onSettings,
+          color: "bg-slate-600 hover:bg-slate-500",
+        },
+        {
+          angle: angles[1],
+          icon: Plus,
+          label: `Add ${addLabel}`,
+          onClick: onAddChild,
+          color: "bg-emerald-600 hover:bg-emerald-500",
+        },
+        {
+          angle: angles[2],
+          icon: dragMode === "move" ? Copy : Move,
+          label: dragMode === "move" ? "Set to Copy" : "Set to Move",
+          onClick: onToggleDragMode,
+          // ✅ copy stays blue; move stays slate (matches handle)
+          color: dragMode === "move" ? "bg-blue-600 hover:bg-blue-500" : "bg-slate-600 hover:bg-slate-500",
+        },
+      ];
+    },
+    [items, addLabel, dragMode, onAddChild, onSettings, onToggleDragMode, openDirection, getAnglesForDirection]
   );
 
   // PORTALED arc menu
@@ -300,10 +396,9 @@ export default function RadialMenu({
           border-r-2 border-solid
           border-gray-700
           transition-all duration-200
-          ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-grab hover:shadow-lg active:cursor-grabbing"}
+          ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:shadow-lg"}
           ${isOpen ? "brightness-105" : ""}
-          transition-all duration-200
-          ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-grab hover:shadow-lg active:cursor-grabbing"}
+          ${handleClassName}
         `}
         style={{
           alignSelf: "center",
@@ -311,9 +406,14 @@ export default function RadialMenu({
           paddingTop: 0,
           paddingBottom: 0,
         }}
-        title={`${dragMode === "copy" ? "Copy" : "Move"} mode - Click for menu`}
+        title={titleText}
       >
-        <ModeIcon className={`${s.handleIcon} text-white/90`} />
+        {/* Handle React components (functions) or forwardRef objects (have $$typeof) */}
+        {(typeof ModeIcon === 'function' || (ModeIcon && ModeIcon.$$typeof)) ? (
+          <ModeIcon className={`${s.handleIcon} text-white/90`} />
+        ) : (
+          ModeIcon
+        )}
       </button>
 
 

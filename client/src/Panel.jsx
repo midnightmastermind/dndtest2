@@ -7,6 +7,9 @@
 import React, { useRef, useMemo, useState, useCallback, useEffect, useContext } from "react";
 import ResizeHandle from "./ResizeHandle";
 import RadialMenu from "./ui/RadialMenu";
+import ContainerKindSelector from "./ui/ContainerKindSelector";
+import LocalIterationNav from "./ui/LocalIterationNav";
+import Display from "./panels/Display";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 
 import { Button } from "./components/ui/button";
@@ -14,9 +17,12 @@ import ButtonPopover from "./ui/ButtonPopover";
 import LayoutForm from "./ui/LayoutForm";
 
 import { GridActionsContext } from "./GridActionsContext";
+import { GridDataContext } from "./GridDataContext";
+import FieldRenderer from "./ui/FieldRenderer";
 import * as CommitHelpers from "./helpers/CommitHelpers";
 import { getPanelContainers, getContainerItems } from "./helpers/LayoutHelpers";
 import { useDraggable, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
+import { resolveContainerStyle, resolveInstanceStyle } from "./helpers/StyleHelpers";
 
 import {
   Settings,
@@ -27,6 +33,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  ArrowLeft,
+  Link2,
 } from "lucide-react";
 
 // ============================================================
@@ -85,11 +93,21 @@ function Panel({
   forceFullscreen = false,
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [kindSelectorOpen, setKindSelectorOpen] = useState(false);
+  const [kindSelectorPos, setKindSelectorPos] = useState(null);
+  const [focusedItem, setFocusedItem] = useState(null); // { instance, occurrence }
+  const addButtonRef = useRef(null);
   const panelDragMode = panel?.defaultDragMode || "move";
+
+  // Callback passed down to instances for double-click focus
+  const handleInstanceFocus = useCallback((instance, occurrence) => {
+    setFocusedItem({ instance, occurrence });
+  }, []);
   // ============================================================
   // CONTEXT
   // ============================================================
-  const { occurrencesById, instancesById, containersById } = useContext(GridActionsContext);
+  const { occurrencesById, instancesById, containersById, viewsById, manifestsById, fieldsById } = useContext(GridActionsContext);
+  const { state } = useContext(GridDataContext);
   const dragCtx = useDragContext();
   const {
     hotTarget,
@@ -137,6 +155,69 @@ function Panel({
     if (!panel) return;
     CommitHelpers.updatePanel({ dispatch, socket, panel: { ...panel, defaultDragMode: nextMode }, emit: true });
   }, [panel, socket, dispatch]);
+
+  const commitPanelStyleUpdate = useCallback((styleUpdates) => {
+    if (!panel) return;
+    CommitHelpers.updatePanel({ dispatch, socket, panel: { ...panel, ...styleUpdates }, emit: true });
+  }, [panel, socket, dispatch]);
+
+  // Find the occurrence for this panel (for persistence settings)
+  const panelOccurrence = useMemo(() => {
+    return Object.values(occurrencesById).find(
+      occ => occ.targetType === "panel" && occ.targetId === panel.id
+    );
+  }, [occurrencesById, panel.id]);
+
+  const commitOccurrenceUpdate = useCallback((updates) => {
+    if (!panelOccurrence?.id) return;
+    CommitHelpers.updateOccurrence({
+      dispatch,
+      socket,
+      occurrence: { id: panelOccurrence.id, ...updates },
+      emit: true,
+    });
+  }, [panelOccurrence, dispatch, socket]);
+
+  // Resolve current view type for the dropdown
+  const currentView = panel.viewId ? viewsById[panel.viewId] : null;
+  const currentViewType = currentView?.viewType || (panel.kind === "notebook" ? "notebook" : panel.kind === "artifact-viewer" ? "artifact-viewer" : "list");
+
+  const handleViewTypeChange = useCallback((e) => {
+    const newViewType = e.target.value;
+    if (newViewType === currentViewType) return;
+
+    if (currentView) {
+      // View exists - update it
+      CommitHelpers.updateView({
+        dispatch,
+        socket,
+        view: { ...currentView, viewType: newViewType },
+        emit: true,
+      });
+    } else {
+      // No view yet - create one and link it to the panel
+      const viewId = crypto.randomUUID();
+      CommitHelpers.createView({
+        dispatch,
+        socket,
+        view: {
+          id: viewId,
+          userId: panel.userId,
+          gridId: panel.gridId,
+          panelId: panel.id,
+          name: "Default View",
+          viewType: newViewType,
+        },
+        emit: true,
+      });
+      CommitHelpers.updatePanel({
+        dispatch,
+        socket,
+        panel: { ...panel, viewId },
+        emit: true,
+      });
+    }
+  }, [currentView, currentViewType, panel, dispatch, socket]);
 
   const setLayout = useCallback((nextLayout) => {
     if (!panel) return;
@@ -261,7 +342,7 @@ function Panel({
       if (l.dense) styles.gridAutoFlow = "dense";
     } else if (l.display === "flex") {
       styles.display = "flex";
-      styles.flexDirection = l.flow === "column" ? "column" : "row";
+      styles.flexDirection = (l.flow === "column" || l.flow === "col") ? "column" : "row";
       styles.flexWrap = l.wrap === "nowrap" ? "nowrap" : "wrap";
     } else if (l.display === "columns") {
       // CSS columns for masonry layout
@@ -321,6 +402,8 @@ function Panel({
 
   return (
     <div
+      role="region"
+      aria-label={layout.name || panel.label || `Panel ${panel.id}`}
       data-panel-id={panel.id}
       className="panel-shell bg-background rounded-lg border border-border shadow-md"
       style={{
@@ -383,7 +466,16 @@ function Panel({
                 dragMode={panelDragMode}
                 onToggleDragMode={togglePanelDragModeQuick}
                 onSettings={() => setSettingsOpen(true)}
-                onAddChild={() => addContainerToPanel?.(panel.id)} 
+                onAddChild={(e) => {
+                  // Get position for popup from click event
+                  const rect = e?.currentTarget?.getBoundingClientRect?.();
+                  if (rect) {
+                    setKindSelectorPos({ top: rect.bottom + 8, left: rect.left });
+                  } else {
+                    setKindSelectorPos(null);
+                  }
+                  setKindSelectorOpen(true);
+                }}
                 addLabel="Container"
                 size="sm"
               />
@@ -396,10 +488,16 @@ function Panel({
               onChange={setLayout}
               onCommit={commitPanelLayout}
               panelId={panel.id}
+              panel={panel}
+              onPanelStyleUpdate={commitPanelStyleUpdate}
               iteration={panel.iteration}
               onIterationChange={commitPanelIteration}
               defaultDragMode={panel.defaultDragMode}
               onDragModeChange={commitPanelDragMode}
+              occurrence={panelOccurrence}
+              onOccurrenceUpdate={commitOccurrenceUpdate}
+              currentViewType={currentViewType}
+              onViewTypeChange={handleViewTypeChange}
             />
           </PopoverContent>
         </Popover>
@@ -422,9 +520,23 @@ function Panel({
           />
         )}
 
-        <span className="text-sm font-small pl-1 flex-1 truncate">
+        <span className="text-sm font-small pl-1 truncate flex-1 flex items-center gap-1">
           {layout.name || panel.id}
+          {panelOccurrence?.linkedGroupId && (
+            <Link2 className="w-3 h-3 text-blue-400 opacity-60 flex-shrink-0" title="Linked" />
+          )}
         </span>
+
+        {/* Local iteration navigation — always visible in header */}
+        <div className="ml-auto mr-2 flex items-center" onPointerDown={(e) => e.stopPropagation()}>
+          <LocalIterationNav
+            occurrence={panelOccurrence}
+            onUpdate={commitOccurrenceUpdate}
+            showModeToggle={true}
+            compact={true}
+            alwaysExpanded={true}
+          />
+        </div>
 
         {showStackNav && (
           <div className="flex items-center gap-1 mr-2">
@@ -441,68 +553,189 @@ function Panel({
         )}
       </div>
 
-      {/* CONTENT - Droppable */}
-      <div
-        ref={dropRef}
-        className="panel-content"
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: layout.scrollY === "auto" ? "auto" : (layout.scrollY === "scroll" ? "scroll" : "hidden"),
-          overflowX: layout.scrollX === "auto" ? "auto" : (layout.scrollX === "scroll" ? "scroll" : "hidden"),
-          padding: 0,
-          outline: (isOver && isContainerDrag) ? "2px solid rgba(50,150,255,0.5)" : "none",
-          outlineOffset: -2,
-          position: "relative",
-        }}
-      >
-        {/* Always-visible pocket background */}
-        <div
-          style={{
-            position: "absolute",
-            inset: "5px",
-            borderRadius: "6px",
-            background: "rgba(20, 25, 30, 0.4)",
-            border: "1px solid rgba(0, 0, 0, 0.5)",
-            boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        />
+      {/* FOCUSED INSTANCE VIEW — temporarily fills panel when double-clicking an instance */}
+      {focusedItem ? (() => {
+        const { instance: fi, occurrence: fo } = focusedItem;
+        const fiFields = (fi?.fieldBindings || [])
+          .map(b => ({ field: fieldsById[b.fieldId], binding: b }))
+          .filter(f => f.field);
+        const fiContext = {
+          gridId: fo?.gridId,
+          containerId: fo?.meta?.containerId,
+          currentIteration: state?.grid?.iterations?.find(i => i.id === state?.grid?.selectedIterationId)?.timeFilter || "daily",
+        };
+        return (
+          <div className="flex-1 flex flex-col min-h-0 overflow-auto p-4">
+            <div className="flex items-center gap-2 mb-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setFocusedItem(null)}
+                className="h-7 text-xs gap-1"
+              >
+                <ArrowLeft className="w-3 h-3" /> Back
+              </Button>
+              <span className="text-sm font-medium">{fi?.label || "Untitled"}</span>
+            </div>
+            <div className="space-y-3">
+              {fiFields.map(({ field, binding }) => (
+                <FieldRenderer
+                  key={field.id}
+                  field={field}
+                  binding={binding}
+                  occurrence={fo}
+                  instance={fi}
+                  context={fiContext}
+                  state={state}
+                  dispatch={dispatch}
+                  socket={socket}
+                  compact={false}
+                />
+              ))}
+              {fiFields.length === 0 && (
+                <div className="text-xs text-muted-foreground italic">No fields bound to this instance</div>
+              )}
+            </div>
+          </div>
+        );
+      })() : null}
 
-        <div style={{ ...getLayoutStyles(), position: "relative", minHeight: "100%", zIndex: 1, padding: layout.padding === "none" ? "5px" : "12px" }}>
-          {containersList.map((container) => (
-            <SortableContainer
-              key={container.id}
-              container={container}
-              panelId={panel.id}
-              panelLayoutOrientation={panelLayoutOrientation}
-              addInstanceToContainer={addInstanceToContainer}
-              isHot={isHotPanel && hotTarget?.containerId === container.id}
-              dispatch={dispatch}
-              socket={socket}
-              gapPx={layout.gapPx || 12}
-            />
-          ))}
-
-          {containersList.length === 0 && (
+      {/* CONTENT — routed through Display component when panel has viewId */}
+      {!focusedItem && panel.viewId ? (
+        <Display
+          panel={panel}
+          view={viewsById[panel.viewId]}
+          containers={containersList}
+          dispatch={dispatch}
+          socket={socket}
+          addContainerToPanel={addContainerToPanel}
+          containerContent={
             <div
-              className="text-xs text-muted-foreground text-center"
+              ref={dropRef}
+              className="panel-content"
               style={{
-                fontStyle: "italic",
-                opacity: 0.6,
-                position: "absolute",
-                top: "40%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                zIndex: 2,
+                flex: 1,
+                minHeight: 0,
+                overflowY: layout.scrollY === "auto" ? "auto" : (layout.scrollY === "scroll" ? "scroll" : "hidden"),
+                overflowX: layout.scrollX === "auto" ? "auto" : (layout.scrollX === "scroll" ? "scroll" : "hidden"),
+                padding: 0,
+                outline: (isOver && isContainerDrag) ? "2px solid rgba(50,150,255,0.5)" : "none",
+                outlineOffset: -2,
+                position: "relative",
               }}
             >
-              Drop containers here
+              <div
+                style={{
+                  position: "absolute",
+                  inset: "5px",
+                  borderRadius: "6px",
+                  background: "rgba(20, 25, 30, 0.4)",
+                  border: "1px solid rgba(0, 0, 0, 0.5)",
+                  boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+                  pointerEvents: "none",
+                  zIndex: 0,
+                }}
+              />
+              <div style={{ ...getLayoutStyles(), position: "relative", minHeight: "100%", zIndex: 1, padding: layout.padding === "none" ? "5px" : "12px" }}>
+                {containersList.map((container) => (
+                  <SortableContainer
+                    key={container.id}
+                    container={container}
+                    panel={panel}
+                    panelId={panel.id}
+                    panelLayoutOrientation={panelLayoutOrientation}
+                    addInstanceToContainer={addInstanceToContainer}
+                    isHot={isHotPanel && hotTarget?.containerId === container.id}
+                    dispatch={dispatch}
+                    socket={socket}
+                    gapPx={layout.gapPx || 12}
+                  />
+                ))}
+                {containersList.length === 0 && (
+                  <div className="text-xs text-muted-foreground text-center" style={{ fontStyle: "italic", opacity: 0.6, position: "absolute", top: "40%", left: "50%", transform: "translate(-50%, -50%)", zIndex: 2 }}>
+                    Drop containers here
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          }
+        />
+      ) : !focusedItem && (panel.kind === "notebook" || panel.kind === "artifact-viewer") ? (
+        /* Legacy: panels without viewId but with kind-based routing */
+        <Display
+          panel={panel}
+          view={{ viewType: panel.kind === "notebook" ? "notebook" : "artifact-viewer" }}
+          containers={containersList}
+          dispatch={dispatch}
+          socket={socket}
+          addContainerToPanel={addContainerToPanel}
+        />
+      ) : !focusedItem ? (
+        /* Default: Standard Panel - Droppable container grid (list view) */
+        <div
+          ref={dropRef}
+          className="panel-content"
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: layout.scrollY === "auto" ? "auto" : (layout.scrollY === "scroll" ? "scroll" : "hidden"),
+            overflowX: layout.scrollX === "auto" ? "auto" : (layout.scrollX === "scroll" ? "scroll" : "hidden"),
+            padding: 0,
+            outline: (isOver && isContainerDrag) ? "2px solid rgba(50,150,255,0.5)" : "none",
+            outlineOffset: -2,
+            position: "relative",
+          }}
+        >
+          {/* Always-visible pocket background */}
+          <div
+            style={{
+              position: "absolute",
+              inset: "5px",
+              borderRadius: "6px",
+              background: "rgba(20, 25, 30, 0.4)",
+              border: "1px solid rgba(0, 0, 0, 0.5)",
+              boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
+
+          <div style={{ ...getLayoutStyles(), position: "relative", minHeight: "100%", zIndex: 1, padding: layout.padding === "none" ? "5px" : "12px" }}>
+            {containersList.map((container) => (
+              <SortableContainer
+                key={container.id}
+                container={container}
+                panel={panel}
+                panelId={panel.id}
+                panelLayoutOrientation={panelLayoutOrientation}
+                addInstanceToContainer={addInstanceToContainer}
+                isHot={isHotPanel && hotTarget?.containerId === container.id}
+                dispatch={dispatch}
+                socket={socket}
+                gapPx={layout.gapPx || 12}
+                onInstanceFocus={handleInstanceFocus}
+              />
+            ))}
+
+            {containersList.length === 0 && (
+              <div
+                className="text-xs text-muted-foreground text-center"
+                style={{
+                  fontStyle: "italic",
+                  opacity: 0.6,
+                  position: "absolute",
+                  top: "40%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  zIndex: 2,
+                }}
+              >
+                Drop containers here
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {!isFullscreen && (
         <ResizeHandle
@@ -524,6 +757,17 @@ function Panel({
           }}
         />
       )}
+
+      {/* Container Kind Selector - appears when adding new container */}
+      <ContainerKindSelector
+        open={kindSelectorOpen}
+        onClose={() => setKindSelectorOpen(false)}
+        onSelect={(kind) => {
+          addContainerToPanel?.(panel.id, kind);
+          setKindSelectorOpen(false);
+        }}
+        position={kindSelectorPos}
+      />
     </div>
   );
 }

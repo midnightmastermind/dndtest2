@@ -3,6 +3,8 @@ import React from "react";
 import { Separator } from "@/components/ui/separator";
 import FormInput from "./FormInput";
 import { Button } from "@/components/ui/button";
+import IterationSettings from "./IterationSettings";
+import StyleEditor from "./StyleEditor";
 
 const ITERATION_MODES = [
   { value: "inherit", label: "Inherit from Panel" },
@@ -19,6 +21,7 @@ const TIME_FILTER_OPTIONS = [
 const DRAG_MODE_OPTIONS = [
   { value: "move", label: "Move (relocate occurrence)" },
   { value: "copy", label: "Copy (create new occurrence)" },
+  { value: "copylink", label: "Copylink (linked occurrence)" },
 ];
 
 export default function ContainerForm({
@@ -27,10 +30,17 @@ export default function ContainerForm({
   onCommitLabel,     // () => void
   onDeleteContainer, // () => void
   containerId,
+  container,         // Full container object (for style fields)
+  onContainerUpdate, // (updates) => void — persist arbitrary container fields
   iteration,         // { mode, timeFilter }
   onIterationChange, // (next) => void
   defaultDragMode,   // "move" | "copy"
   onDragModeChange,  // (mode) => void
+  occurrence,        // The occurrence for this container (for persistence settings)
+  onOccurrenceUpdate, // (updates) => void
+  onSaveAsTemplate,  // () => void — save current items as a template
+  onFillFromTemplate, // (templateId) => void — fill from a saved template
+  templates,         // Array of available templates
 }) {
   const iter = iteration || { mode: "inherit", timeFilter: "daily" };
 
@@ -84,6 +94,22 @@ export default function ContainerForm({
 
       <Separator />
 
+      {/* Persistence Mode (occurrence-level) */}
+      {occurrence && (
+        <>
+          <div className="py-2">
+            <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Persistence</h4>
+            <IterationSettings
+              occurrence={occurrence}
+              onUpdate={onOccurrenceUpdate}
+              entityType="container"
+              compact
+            />
+          </div>
+          <Separator />
+        </>
+      )}
+
       {/* Iteration Settings */}
       <div className="pt-2">
         <div className="flex items-center justify-between">
@@ -125,6 +151,71 @@ export default function ContainerForm({
           </p>
         )}
       </div>
+
+      <Separator />
+
+      {/* Templates */}
+      <div className="py-2">
+        <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Templates</h4>
+        <div className="flex flex-col gap-1.5">
+          {onSaveAsTemplate && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-xs w-full"
+              onClick={onSaveAsTemplate}
+            >
+              Save Current Items as Template
+            </Button>
+          )}
+          {(templates || []).length > 0 && (
+            <div className="space-y-1">
+              {templates.map(t => (
+                <Button
+                  key={t.id}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs w-full justify-start"
+                  onClick={() => onFillFromTemplate?.(t.id)}
+                >
+                  Fill from: {t.name}
+                </Button>
+              ))}
+            </div>
+          )}
+          {!(templates || []).length && (
+            <p className="text-[10px] text-muted-foreground">No templates saved yet.</p>
+          )}
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Container Style */}
+      <StyleEditor
+        styleMode={container?.styleMode || "inherit"}
+        ownStyle={container?.ownStyle}
+        onStyleModeChange={(mode) => onContainerUpdate?.({ styleMode: mode })}
+        onOwnStyleChange={(style) => onContainerUpdate?.({ ownStyle: style })}
+        label="Container Style"
+        inheritLabel="Panel"
+      />
+
+      <Separator />
+
+      {/* Child Instance Style Defaults */}
+      <StyleEditor
+        styleMode={container?.childInstanceStyle ? "own" : "inherit"}
+        ownStyle={container?.childInstanceStyle}
+        onStyleModeChange={(mode) => {
+          if (mode === "inherit") onContainerUpdate?.({ childInstanceStyle: null });
+        }}
+        onOwnStyleChange={(style) => onContainerUpdate?.({ childInstanceStyle: style })}
+        label="Child Instance Defaults"
+        inheritLabel="Panel"
+      />
 
       <Separator />
 

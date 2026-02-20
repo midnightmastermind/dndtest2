@@ -20,7 +20,15 @@ import http from "http";
 import cors from "cors";
 import mongoose from "mongoose";
 import { Server } from "socket.io";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import "dotenv/config";
+
+// __dirname polyfill for ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ========================================================
 // MODELS
@@ -32,6 +40,15 @@ import Grid from "./models/Grid.js";
 import User from "./models/User.js";
 import Occurrence from "./models/Occurrence.js";
 import Field from "./models/Field.js";
+import Transaction from "./models/Transaction.js";
+import Manifest from "./models/Manifest.js";
+import View from "./models/View.js";
+import Doc from "./models/Doc.js";
+import Folder from "./models/Folder.js";
+import Artifact from "./models/Artifact.js";
+import Operation from "./models/Operation.js";
+import Iteration from "./models/Iteration.js";
+import { nanoid } from "nanoid";
 
 // ========================================================
 // JWT
@@ -42,6 +59,27 @@ import jwt from "jsonwebtoken";
 // OCCURRENCE HELPERS
 // ========================================================
 import { autofillOccurrences, autofillGrid, autofillPanel, autofillContainer, getOccurrencesForGrid, createOccurrenceData } from "./utils/occurrenceHelpers.js";
+
+// ========================================================
+// MODEL LOOKUP HELPER (for undo/redo entity operations)
+// ========================================================
+const MODEL_MAP = {
+  grid: Grid,
+  panel: Panel,
+  container: Container,
+  instance: Instance,
+  field: Field,
+  occurrence: Occurrence,
+  manifest: Manifest,
+  view: View,
+  doc: Doc,
+  folder: Folder,
+  artifact: Artifact,
+};
+
+function getModelByType(entityType) {
+  return MODEL_MAP[entityType] || null;
+}
 
 // ========================================================
 // DEFAULT USER DATA (for new user registration)
@@ -151,6 +189,11 @@ function ensureUserCache(userId) {
       instancesById: {},
       occurrencesById: {},
       fieldsById: {},
+      manifestsById: {},
+      viewsById: {},
+      docsById: {},
+      foldersById: {},
+      artifactsById: {},
     };
   }
   return cacheByUser[userId];
@@ -177,13 +220,20 @@ async function loadUserIntoCache(userId) {
 
   const uc = ensureUserCache(userId);
 
-  const [grids, panels, containers, instances, occurrences, fields] = await Promise.all([
+  const [grids, panels, containers, instances, occurrences, fields, manifests, views, docs, folders, artifacts, operations, iterations] = await Promise.all([
     Grid.find({ userId }).sort({ createdAt: 1 }),
     Panel.find({ userId }).sort({ createdAt: 1 }),
     Container.find({ userId }).sort({ createdAt: 1 }),
     Instance.find({ userId }).sort({ createdAt: 1 }),
     Occurrence.find({ userId }).sort({ timestamp: -1 }),
     Field.find({ userId }).sort({ createdAt: 1 }),
+    Manifest.find({ userId }).sort({ createdAt: 1 }),
+    View.find({ userId }).sort({ createdAt: 1 }),
+    Doc.find({ userId }).sort({ createdAt: 1 }),
+    Folder.find({ userId }).sort({ createdAt: 1 }),
+    Artifact.find({ userId }).sort({ createdAt: 1 }),
+    Operation.find({ userId }).sort({ createdAt: 1 }),
+    Iteration.find({ userId }).sort({ createdAt: 1 }),
   ]);
 
   // ---- gridsById
@@ -208,6 +258,7 @@ async function loadUserIntoCache(userId) {
     const obj = c.toObject();
     const id = obj.id || obj.containerId || obj._id.toString();
     uc.containersById[id] = {
+      ...obj,
       id,
       label: obj.label ?? "Untitled",
       occurrences: Array.isArray(obj.occurrences) ? obj.occurrences : [],
@@ -248,6 +299,62 @@ async function loadUserIntoCache(userId) {
     };
   });
 
+  // ---- manifestsById
+  uc.manifestsById = {};
+  manifests.forEach((m) => {
+    const obj = m.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.manifestsById[id] = { ...obj, id };
+  });
+
+  // ---- viewsById
+  uc.viewsById = {};
+  views.forEach((v) => {
+    const obj = v.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.viewsById[id] = { ...obj, id };
+  });
+
+  // ---- docsById
+  uc.docsById = {};
+  docs.forEach((d) => {
+    const obj = d.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.docsById[id] = { ...obj, id };
+  });
+
+  // ---- foldersById
+  uc.foldersById = {};
+  folders.forEach((f) => {
+    const obj = f.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.foldersById[id] = { ...obj, id };
+  });
+
+  // ---- artifactsById
+  uc.artifactsById = {};
+  artifacts.forEach((a) => {
+    const obj = a.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.artifactsById[id] = { ...obj, id };
+  });
+
+  // ---- operationsById
+  uc.operationsById = {};
+  operations.forEach((o) => {
+    const obj = o.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.operationsById[id] = { ...obj, id };
+  });
+
+  // ---- iterationsById
+  uc.iterationsById = {};
+  iterations.forEach((i) => {
+    const obj = i.toObject();
+    const id = obj.id || obj._id.toString();
+    uc.iterationsById[id] = { ...obj, id };
+  });
+
   console.log("✅ CACHE READY FOR USER:", userId);
   console.log("   Grids:", Object.keys(uc.gridsById).length);
   console.log("   Panels:", Object.keys(uc.panelsById).length);
@@ -255,6 +362,11 @@ async function loadUserIntoCache(userId) {
   console.log("   Instances:", Object.keys(uc.instancesById).length);
   console.log("   Occurrences:", Object.keys(uc.occurrencesById).length);
   console.log("   Fields:", Object.keys(uc.fieldsById).length);
+  console.log("   Manifests:", Object.keys(uc.manifestsById).length);
+  console.log("   Views:", Object.keys(uc.viewsById).length);
+  console.log("   Docs:", Object.keys(uc.docsById).length);
+  console.log("   Folders:", Object.keys(uc.foldersById).length);
+  console.log("   Artifacts:", Object.keys(uc.artifactsById).length);
   console.log("===============================\n");
 
   return uc;
@@ -262,7 +374,7 @@ async function loadUserIntoCache(userId) {
 
 function userCacheReady(userId) {
   const uc = cacheByUser[userId];
-  return !!(uc && uc.gridsById && uc.panelsById && uc.containersById && uc.instancesById && uc.occurrencesById && uc.fieldsById);
+  return !!(uc && uc.gridsById && uc.panelsById && uc.containersById && uc.instancesById && uc.occurrencesById && uc.fieldsById && uc.manifestsById && uc.viewsById && uc.docsById && uc.foldersById && uc.artifactsById);
 }
 
 // ========================================================
@@ -376,6 +488,11 @@ io.on("connection", (socket) => {
           instances: Object.values(uc.instancesById),
           occurrences: gridOccurrences,
           fields: Object.values(uc.fieldsById),
+          manifests: Object.values(uc.manifestsById),
+          views: Object.values(uc.viewsById),
+          docs: Object.values(uc.docsById),
+          folders: Object.values(uc.foldersById),
+          artifacts: Object.values(uc.artifactsById),
           grids,
         });
       };
@@ -653,6 +770,8 @@ io.on("connection", (socket) => {
       const prev = uc.containersById[id] || { id, label: "Untitled", occurrences: [] };
 
       const next = {
+        ...prev,
+        ...container,
         id,
         label: container.label ?? prev.label ?? "Untitled",
         occurrences: Array.isArray(container.occurrences) ? container.occurrences : prev.occurrences ?? [],
@@ -933,6 +1052,7 @@ io.on("connection", (socket) => {
         placement: occurrence.placement,
         fields: occurrence.fields,
         meta: occurrence.meta,
+        linkedGroupId: occurrence.linkedGroupId || null,
       });
 
       uc.occurrencesById[id] = occurrenceData;
@@ -968,12 +1088,107 @@ io.on("connection", (socket) => {
 
       uc.occurrencesById[id] = next;
 
+      // ============================================================
+      // TRANSACTION: Create MeasureOp when fields change
+      // ============================================================
+      if (occurrence.fields && Object.keys(occurrence.fields).length > 0) {
+        const ops = [];
+        for (const [fieldId, fieldValue] of Object.entries(occurrence.fields)) {
+          const prevFieldVal = prev.fields?.[fieldId];
+          // Extract raw values (handle both { value, flow } format and raw values)
+          const newVal = fieldValue?.value ?? fieldValue;
+          const oldVal = prevFieldVal?.value ?? prevFieldVal;
+          const flow = fieldValue?.flow || "in";
+
+          ops.push({
+            type: "measure",
+            measure: {
+              occurrenceId: id,
+              fieldId,
+              value: newVal,
+              previousValue: oldVal,
+              flow,
+            },
+          });
+        }
+
+        if (ops.length > 0) {
+          const tx = new Transaction({
+            id: nanoid(12),
+            userId,
+            gridId: next.gridId,
+            timestamp: new Date(),
+            operations: ops,
+            state: "applied",
+          });
+          await tx.save();
+        }
+      }
+
       await Occurrence.findOneAndUpdate({ id, userId }, next, { upsert: true });
 
       socket.to(userRoom(userId)).emit("occurrence_updated", { occurrence: next });
+
+      // COPYLINK: propagate field changes to all linked occurrences
+      if (next.linkedGroupId && occurrence.fields && Object.keys(occurrence.fields).length > 0) {
+        const linkedOccs = Object.values(uc.occurrencesById || {}).filter(
+          o => o.linkedGroupId === next.linkedGroupId && o.id !== id
+        );
+        for (const linked of linkedOccs) {
+          const updatedFields = { ...(linked.fields || {}), ...occurrence.fields };
+          const updatedLinked = { ...linked, fields: updatedFields };
+          uc.occurrencesById[linked.id] = updatedLinked;
+          await Occurrence.findOneAndUpdate({ id: linked.id, userId }, updatedLinked, { upsert: true });
+          // Emit to all windows (including sender for linked updates)
+          socket.to(userRoom(userId)).emit("occurrence_updated", { occurrence: updatedLinked });
+          socket.emit("occurrence_updated", { occurrence: updatedLinked });
+        }
+      }
     } catch (err) {
       console.error("update_occurrence error:", err);
       socket.emit("server_error", "Failed to update occurrence");
+    }
+  });
+
+  // ======================================================
+  // UPDATE DOC CONTENT — Save TipTap JSON to Doc model
+  // ======================================================
+  socket.on("update_doc_content", async ({ docId, content } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !docId) return;
+      await Doc.findOneAndUpdate({ id: docId, userId }, { content }, { upsert: false });
+      socket.to(userRoom(userId)).emit("doc_content_updated", { docId, content });
+    } catch (err) {
+      console.error("update_doc_content error:", err);
+    }
+  });
+
+  // ======================================================
+  // BREAK LINK — Remove linkedGroupId from an occurrence
+  // ======================================================
+  socket.on("break_link", async ({ occurrenceId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+      if (!occurrenceId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const occ = await Occurrence.findOne({ id: occurrenceId, userId });
+      if (!occ) return socket.emit("server_error", "Occurrence not found");
+
+      occ.linkedGroupId = null;
+      await occ.save();
+
+      const occObj = occ.toObject();
+      uc.occurrencesById[occurrenceId] = { ...uc.occurrencesById[occurrenceId], ...occObj, id: occurrenceId };
+
+      io.to(userRoom(userId)).emit("occurrence_updated", { occurrence: occObj });
+    } catch (err) {
+      console.error("break_link error:", err);
+      socket.emit("server_error", "Failed to break link");
     }
   });
 
@@ -997,7 +1212,415 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
-  // FIELDS — CREATE/UPDATE/DELETE
+  // TRANSACTIONS — QUERY
+  // ======================================================
+  socket.on("get_transactions", async ({ gridId, fieldId, timeRange, limit = 100, includeUndone = true } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      const query = { userId };
+      // Include undone transactions for history view (they show with strikethrough)
+      if (!includeUndone) {
+        query.state = { $in: ["applied", "redone"] };
+      }
+      if (gridId) query.gridId = gridId;
+      if (fieldId) query["operations.measure.fieldId"] = fieldId;
+      if (timeRange?.start || timeRange?.end) {
+        query.timestamp = {};
+        if (timeRange.start) query.timestamp.$gte = new Date(timeRange.start);
+        if (timeRange.end) query.timestamp.$lte = new Date(timeRange.end);
+      }
+
+      const transactions = await Transaction.find(query)
+        .sort({ timestamp: -1 })
+        .limit(limit);
+
+      socket.emit("transactions", { transactions });
+    } catch (err) {
+      console.error("get_transactions error:", err);
+      socket.emit("server_error", "Failed to get transactions");
+    }
+  });
+
+  // ======================================================
+  // TRANSACTIONS — UNDO/REDO (Git-like event chain)
+  // Undo reverses operations: moves go back, creates get soft-deleted, etc.
+  // Calculations are derived from current state, so they auto-update.
+  // ======================================================
+  socket.on("undo_transaction", async ({ transactionId, gridId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !transactionId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      // Find the transaction
+      const tx = await Transaction.findOne({ id: transactionId, userId });
+      if (!tx || tx.state === "undone") {
+        socket.emit("undo_result", { success: false, error: "Transaction not found or already undone" });
+        return;
+      }
+
+      // Reverse each operation
+      const reversedOps = [];
+      for (const op of tx.operations) {
+        if (op.type === "occurrence_list" && op.occurrenceList) {
+          const ol = op.occurrenceList;
+
+          // Reverse the operation based on action type
+          switch (ol.action) {
+            case "add": {
+              // Was added → remove it
+              const occ = await Occurrence.findOne({ id: ol.occurrenceId });
+              if (occ) {
+                // Soft delete by setting containerId to null or marking deleted
+                await Occurrence.findOneAndUpdate(
+                  { id: ol.occurrenceId },
+                  { $set: { _deleted: true, _deletedAt: new Date() } }
+                );
+                reversedOps.push({ type: "remove", occurrenceId: ol.occurrenceId });
+              }
+              break;
+            }
+            case "remove": {
+              // Was removed → add it back
+              await Occurrence.findOneAndUpdate(
+                { id: ol.occurrenceId },
+                { $unset: { _deleted: 1, _deletedAt: 1 } }
+              );
+              reversedOps.push({ type: "restore", occurrenceId: ol.occurrenceId });
+              break;
+            }
+            case "move": {
+              // Was moved from A to B → move back from B to A
+              const occ = await Occurrence.findOne({ id: ol.occurrenceId });
+              if (occ && ol.from) {
+                await Occurrence.findOneAndUpdate(
+                  { id: ol.occurrenceId },
+                  {
+                    $set: {
+                      containerId: ol.from.containerId,
+                      panelId: ol.from.panelId,
+                      // Store animation info for slide-back
+                      _undoAnimation: {
+                        type: "slide",
+                        from: { containerId: ol.to?.containerId, panelId: ol.to?.panelId },
+                        to: { containerId: ol.from.containerId, panelId: ol.from.panelId }
+                      }
+                    }
+                  }
+                );
+                reversedOps.push({
+                  type: "move_back",
+                  occurrenceId: ol.occurrenceId,
+                  from: ol.to,
+                  to: ol.from
+                });
+              }
+              break;
+            }
+            case "copy": {
+              // Was copied → delete the copy
+              await Occurrence.findOneAndUpdate(
+                { id: ol.occurrenceId },
+                { $set: { _deleted: true, _deletedAt: new Date() } }
+              );
+              reversedOps.push({ type: "delete_copy", occurrenceId: ol.occurrenceId });
+              break;
+            }
+          }
+        } else if (op.type === "measure" && op.measure) {
+          // Field value changed → restore previous value
+          const m = op.measure;
+          if (m.previousValue !== undefined) {
+            await Occurrence.findOneAndUpdate(
+              { id: m.occurrenceId },
+              { $set: { [`fields.${m.fieldId}`]: m.previousValue } }
+            );
+            reversedOps.push({
+              type: "restore_value",
+              occurrenceId: m.occurrenceId,
+              fieldId: m.fieldId,
+              value: m.previousValue
+            });
+          }
+        } else if (op.type === "entity" && op.entity) {
+          const e = op.entity;
+          switch (e.action) {
+            case "create": {
+              // Entity was created → soft delete it
+              const Model = getModelByType(e.entityType);
+              if (Model) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $set: { _deleted: true, _deletedAt: new Date() } }
+                );
+                reversedOps.push({ type: "soft_delete", entityType: e.entityType, entityId: e.entityId });
+              }
+              break;
+            }
+            case "delete": {
+              // Entity was deleted → restore it
+              const Model = getModelByType(e.entityType);
+              if (Model) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $unset: { _deleted: 1, _deletedAt: 1 } }
+                );
+                reversedOps.push({ type: "restore", entityType: e.entityType, entityId: e.entityId });
+              }
+              break;
+            }
+            case "update": {
+              // Entity was updated → restore previous data
+              const Model = getModelByType(e.entityType);
+              if (Model && e.previousData) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $set: e.previousData }
+                );
+                reversedOps.push({ type: "restore_data", entityType: e.entityType, entityId: e.entityId });
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // Mark transaction as undone
+      await Transaction.findOneAndUpdate(
+        { id: transactionId },
+        { $set: { state: "undone", undoneAt: new Date(), undoneBy: userId } }
+      );
+
+      // Reload cache to reflect changes
+      await loadUserIntoCache(userId);
+
+      // Emit success with reversed operations for animation
+      socket.emit("undo_result", {
+        success: true,
+        transactionId,
+        reversedOps,
+        // Include animation hints
+        animate: reversedOps.some(op => op.type === "move_back")
+      });
+
+      // Broadcast full state update to all user's clients
+      io.to(userId).emit("sync_state", {
+        panels: uc.panels || [],
+        containers: uc.containers || [],
+        occurrences: uc.occurrences || [],
+        instances: uc.instances || [],
+        fields: uc.fields || [],
+      });
+
+    } catch (err) {
+      console.error("undo_transaction error:", err);
+      socket.emit("undo_result", { success: false, error: err.message });
+    }
+  });
+
+  socket.on("redo_transaction", async ({ transactionId, gridId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !transactionId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      // Find the undone transaction
+      const tx = await Transaction.findOne({ id: transactionId, userId, state: "undone" });
+      if (!tx) {
+        socket.emit("redo_result", { success: false, error: "Transaction not found or not undone" });
+        return;
+      }
+
+      // Re-apply each operation (same as original, not reversed)
+      for (const op of tx.operations) {
+        if (op.type === "occurrence_list" && op.occurrenceList) {
+          const ol = op.occurrenceList;
+
+          switch (ol.action) {
+            case "add": {
+              // Re-add: undelete
+              await Occurrence.findOneAndUpdate(
+                { id: ol.occurrenceId },
+                { $unset: { _deleted: 1, _deletedAt: 1 } }
+              );
+              break;
+            }
+            case "remove": {
+              // Re-remove: soft delete again
+              await Occurrence.findOneAndUpdate(
+                { id: ol.occurrenceId },
+                { $set: { _deleted: true, _deletedAt: new Date() } }
+              );
+              break;
+            }
+            case "move": {
+              // Re-move: move back to the 'to' position
+              if (ol.to) {
+                await Occurrence.findOneAndUpdate(
+                  { id: ol.occurrenceId },
+                  { $set: { containerId: ol.to.containerId, panelId: ol.to.panelId } }
+                );
+              }
+              break;
+            }
+            case "copy": {
+              // Re-copy: undelete the copy
+              await Occurrence.findOneAndUpdate(
+                { id: ol.occurrenceId },
+                { $unset: { _deleted: 1, _deletedAt: 1 } }
+              );
+              break;
+            }
+          }
+        } else if (op.type === "measure" && op.measure) {
+          // Re-apply the new value
+          const m = op.measure;
+          await Occurrence.findOneAndUpdate(
+            { id: m.occurrenceId },
+            { $set: { [`fields.${m.fieldId}`]: m.value } }
+          );
+        } else if (op.type === "entity" && op.entity) {
+          const e = op.entity;
+          switch (e.action) {
+            case "create": {
+              // Re-create: undelete
+              const Model = getModelByType(e.entityType);
+              if (Model) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $unset: { _deleted: 1, _deletedAt: 1 } }
+                );
+              }
+              break;
+            }
+            case "delete": {
+              // Re-delete: soft delete again
+              const Model = getModelByType(e.entityType);
+              if (Model) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $set: { _deleted: true, _deletedAt: new Date() } }
+                );
+              }
+              break;
+            }
+            case "update": {
+              // Re-update: apply the new data again
+              const Model = getModelByType(e.entityType);
+              if (Model && e.data) {
+                await Model.findOneAndUpdate(
+                  { id: e.entityId },
+                  { $set: e.data }
+                );
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // Mark transaction as redone
+      await Transaction.findOneAndUpdate(
+        { id: transactionId },
+        { $set: { state: "redone", redoneAt: new Date(), redoneBy: userId } }
+      );
+
+      // Reload cache
+      await loadUserIntoCache(userId);
+
+      socket.emit("redo_result", { success: true, transactionId });
+
+      // Broadcast full state update
+      io.to(userId).emit("sync_state", {
+        panels: uc.panels || [],
+        containers: uc.containers || [],
+        occurrences: uc.occurrences || [],
+        instances: uc.instances || [],
+        fields: uc.fields || [],
+      });
+
+    } catch (err) {
+      console.error("redo_transaction error:", err);
+      socket.emit("redo_result", { success: false, error: err.message });
+    }
+  });
+
+  // Get the last undoable transaction for a grid
+  socket.on("get_undo_state", async ({ gridId } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId) return;
+
+      // Find last applied/redone transaction (can be undone)
+      const lastUndoable = await Transaction.findOne({
+        userId,
+        gridId,
+        state: { $in: ["applied", "redone"] }
+      }).sort({ timestamp: -1 });
+
+      // Find last undone transaction (can be redone)
+      const lastRedoable = await Transaction.findOne({
+        userId,
+        gridId,
+        state: "undone"
+      }).sort({ undoneAt: -1 });
+
+      socket.emit("undo_state", {
+        canUndo: !!lastUndoable,
+        lastUndoableId: lastUndoable?.id,
+        lastUndoableDesc: lastUndoable?.description,
+        canRedo: !!lastRedoable,
+        lastRedoableId: lastRedoable?.id,
+        lastRedoableDesc: lastRedoable?.description,
+      });
+    } catch (err) {
+      console.error("get_undo_state error:", err);
+    }
+  });
+
+  socket.on("get_field_history", async ({ fieldId, occurrenceId, limit = 50 } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !fieldId) return;
+
+      const query = {
+        userId,
+        state: "applied",
+        "operations.measure.fieldId": fieldId,
+      };
+      if (occurrenceId) query["operations.measure.occurrenceId"] = occurrenceId;
+
+      const transactions = await Transaction.find(query)
+        .sort({ timestamp: -1 })
+        .limit(limit);
+
+      // Extract just the measure operations for this field
+      const history = transactions.flatMap(tx =>
+        tx.operations
+          .filter(op => op.type === "measure" && op.measure.fieldId === fieldId)
+          .map(op => ({
+            timestamp: tx.timestamp,
+            transactionId: tx.id,
+            ...op.measure,
+          }))
+      );
+
+      socket.emit("field_history", { fieldId, history });
+    } catch (err) {
+      console.error("get_field_history error:", err);
+      socket.emit("server_error", "Failed to get field history");
+    }
+  });
+
+  // ======================================================
+  // FIELDS — CREATE/UPDATE/DELETE (Grid-level field management)
+  // Fields are associated with a grid and contain all calculation config
   // ======================================================
   socket.on("create_field", async ({ field } = {}) => {
     try {
@@ -1008,16 +1631,21 @@ io.on("connection", (socket) => {
       const uc = ensureUserCache(userId);
 
       const id = field?.id;
-      if (!id) return;
+      const gridId = field?.gridId;
+      if (!id || !gridId) return;
 
       const fieldData = {
         id,
         userId,
+        gridId,
         name: field.name || "Untitled",
         type: field.type || "text",
         mode: field.mode || "input",
         unit: field.unit,
         metric: field.metric,
+        conditions: field.conditions,
+        triggers: field.triggers || [],
+        display: field.display || { role: "input", showLabel: true, order: 0 },
         meta: field.meta || {},
       };
 
@@ -1129,6 +1757,104 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
+  // TEMPLATES — SAVE/FILL
+  // ======================================================
+  socket.on("save_template", async ({ gridId, template } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !gridId || !template?.id) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const grid = uc.gridsById[gridId];
+      if (!grid) return;
+
+      const templates = [...(grid.templates || [])];
+      const idx = templates.findIndex(t => t.id === template.id);
+      if (idx >= 0) {
+        templates[idx] = { ...templates[idx], ...template };
+      } else {
+        templates.push(template);
+      }
+
+      grid.templates = templates;
+      uc.gridsById[gridId] = grid;
+
+      await Grid.findOneAndUpdate({ _id: gridId, userId }, { templates }, { upsert: true });
+      socket.to(userRoom(userId)).emit("grid_updated", { gridId, grid: { templates } });
+    } catch (err) {
+      console.error("save_template error:", err);
+    }
+  });
+
+  socket.on("fill_from_template", async ({ gridId, templateId, containerId, iterationValue } = {}) => {
+    try {
+      const userId = socket.userId;
+      if (!userId || !gridId || !templateId || !containerId) return;
+
+      if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+      const uc = ensureUserCache(userId);
+
+      const grid = uc.gridsById[gridId];
+      if (!grid) return;
+
+      const template = (grid.templates || []).find(t => t.id === templateId);
+      if (!template?.items?.length) return;
+
+      const container = uc.containersById[containerId];
+      if (!container) return;
+
+      const dateValue = iterationValue || new Date();
+      const createdOccurrences = [];
+
+      for (const item of template.items) {
+        if (!item.instanceId) continue;
+
+        const occId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const occ = createOccurrenceData({
+          id: occId,
+          userId,
+          targetType: "instance",
+          targetId: item.instanceId,
+          gridId,
+          iteration: { key: "time", value: dateValue, mode: "specific" },
+          fields: item.fieldDefaults || {},
+          meta: { containerId },
+          // Preserve linkedGroupId from template items — copylinked items
+          // share the same group so field values sync across day pages
+          ...(item.linkedGroupId ? { linkedGroupId: item.linkedGroupId } : {}),
+        });
+
+        uc.occurrencesById[occId] = occ;
+        await Occurrence.findOneAndUpdate({ id: occId, userId }, occ, { upsert: true });
+
+        // Add to container
+        container.occurrences = [...(container.occurrences || []), occId];
+        createdOccurrences.push(occ);
+      }
+
+      // Save container with new occurrences
+      uc.containersById[containerId] = container;
+      await Container.findOneAndUpdate(
+        { id: containerId, userId },
+        { occurrences: container.occurrences },
+        { upsert: true }
+      );
+
+      // Emit all at once
+      for (const occ of createdOccurrences) {
+        socket.emit("occurrence_created", { occurrence: occ });
+        socket.to(userRoom(userId)).emit("occurrence_created", { occurrence: occ });
+      }
+      socket.emit("container_updated", { container });
+      socket.to(userRoom(userId)).emit("container_updated", { container });
+    } catch (err) {
+      console.error("fill_from_template error:", err);
+    }
+  });
+
+  // ======================================================
   // GRID DELETE (grid is gridId + userId)
   // ======================================================
   socket.on("delete_grid", async ({ gridId } = {}) => {
@@ -1191,11 +1917,158 @@ io.on("connection", (socket) => {
   });
 
   // ======================================================
+  // GENERIC CRUD HELPER for new models
+  // Used by: Manifest, View, Doc, Folder, Artifact
+  // ======================================================
+  function setupGenericCRUD(modelName, Model, cacheKey) {
+    socket.on(`create_${modelName}`, async ({ [modelName]: entity } = {}) => {
+      try {
+        const userId = socket.userId;
+        if (!userId) return;
+        if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+        const uc = ensureUserCache(userId);
+        const id = entity?.id;
+        if (!id) return;
+        const next = { ...entity, id, userId };
+        uc[cacheKey][id] = next;
+        await Model.findOneAndUpdate({ id, userId }, next, { upsert: true });
+        socket.to(userRoom(userId)).emit(`${modelName}_created`, { [modelName]: next });
+      } catch (err) {
+        console.error(`create_${modelName} error:`, err);
+        socket.emit("server_error", `Failed to create ${modelName}`);
+      }
+    });
+
+    socket.on(`update_${modelName}`, async ({ [modelName]: entity } = {}) => {
+      try {
+        const userId = socket.userId;
+        if (!userId) return;
+        if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+        const uc = ensureUserCache(userId);
+        const id = entity?.id;
+        if (!id) return;
+        const prev = uc[cacheKey][id] || {};
+        const next = { ...prev, ...entity, id, userId };
+        uc[cacheKey][id] = next;
+        await Model.findOneAndUpdate({ id, userId }, next, { upsert: true });
+        socket.to(userRoom(userId)).emit(`${modelName}_updated`, { [modelName]: next });
+      } catch (err) {
+        console.error(`update_${modelName} error:`, err);
+        socket.emit("server_error", `Failed to update ${modelName}`);
+      }
+    });
+
+    socket.on(`delete_${modelName}`, async ({ [`${modelName}Id`]: entityId } = {}) => {
+      try {
+        const userId = socket.userId;
+        if (!userId) return;
+        if (!userCacheReady(userId)) await loadUserIntoCache(userId);
+        const uc = ensureUserCache(userId);
+        if (!entityId) return;
+        if (uc[cacheKey]?.[entityId]) delete uc[cacheKey][entityId];
+        await Model.findOneAndDelete({ id: entityId, userId });
+        socket.to(userRoom(userId)).emit(`${modelName}_deleted`, { [`${modelName}Id`]: entityId });
+      } catch (err) {
+        console.error(`delete_${modelName} error:`, err);
+        socket.emit("server_error", `Failed to delete ${modelName}`);
+      }
+    });
+  }
+
+  // Register CRUD for all new models
+  setupGenericCRUD("manifest", Manifest, "manifestsById");
+  setupGenericCRUD("view", View, "viewsById");
+  setupGenericCRUD("doc", Doc, "docsById");
+  setupGenericCRUD("folder", Folder, "foldersById");
+  setupGenericCRUD("artifact", Artifact, "artifactsById");
+  setupGenericCRUD("operation", Operation, "operationsById");
+  setupGenericCRUD("iteration", Iteration, "iterationsById");
+
+  // ======================================================
   // DISCONNECT
   // ======================================================
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
   });
+});
+
+// ========================================================
+// FILE UPLOAD (multer)
+// ========================================================
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadsDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  },
+});
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
+
+app.use("/uploads", express.static(uploadsDir));
+
+function getArtifactType(mime) {
+  if (mime?.startsWith("image/")) return "image";
+  if (mime?.startsWith("video/")) return "video";
+  if (mime?.startsWith("audio/")) return "audio";
+  if (mime === "application/pdf") return "pdf";
+  return "file";
+}
+
+app.post("/api/upload", upload.single("file"), async (req, res) => {
+  try {
+    const { userId, gridId, folderId, manifestId } = req.body;
+    if (!userId || !req.file) return res.status(400).json({ error: "Missing userId or file" });
+
+    const artifact = new Artifact({
+      id: nanoid(),
+      userId,
+      gridId: gridId || null,
+      folderId: folderId || null,
+      name: req.file.originalname,
+      artifactType: getArtifactType(req.file.mimetype),
+      mimeType: req.file.mimetype,
+      extension: path.extname(req.file.originalname).replace(".", ""),
+      size: req.file.size,
+      storageType: "local",
+      storagePath: `/uploads/${req.file.filename}`,
+      sortOrder: Date.now(),
+    });
+    await artifact.save();
+
+    const obj = artifact.toObject();
+    const cache = cacheByUser[userId];
+    if (cache) cache.artifactsById[obj.id] = obj;
+    io.to(userRoom(userId)).emit("artifact_created", obj);
+
+    res.json({ artifact: obj });
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Storage settings endpoint
+app.post("/api/storage-settings", async (req, res) => {
+  try {
+    const { userId, gridId, manifestId, settings } = req.body;
+    if (!manifestId) return res.status(400).json({ error: "Missing manifestId" });
+    const manifest = await Manifest.findOneAndUpdate(
+      { id: manifestId },
+      { $set: { "meta.storageSettings": settings } },
+      { new: true }
+    );
+    if (!manifest) return res.status(404).json({ error: "Manifest not found" });
+    const obj = manifest.toObject();
+    const cache = cacheByUser[userId];
+    if (cache) cache.manifestsById[obj.id] = obj;
+    io.to(userRoom(userId)).emit("manifest_updated", obj);
+    res.json({ manifest: obj });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ========================================================

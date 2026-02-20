@@ -5,17 +5,18 @@
   "scripts": {
     "start": "npm run build:client && npm run serve",
     "serve": "concurrently \"npm run serve:client\" \"npm run start:server\"",
-    "serve:client": "npx serve -s ./client/build",
+    "serve:client": "npx serve -s ./client/dist",
     "start:server": "npm --prefix ./server run dev",
     "build:client": "npm --prefix ./client run build",
     "dev": "concurrently \"npm run dev:client\" \"npm run start:server\"",
-    "dev:client": "npm --prefix ./client start"
+    "dev:client": "npm --prefix ./client run dev"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/midnightmastermind/dndtest2.git"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
     "concurrently": "^8.2.1"
   },
   "keywords": [],

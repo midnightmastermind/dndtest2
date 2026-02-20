@@ -19,6 +19,21 @@ import {
   createFieldAction,
   updateFieldAction,
   deleteFieldAction,
+  createManifestAction,
+  updateManifestAction,
+  deleteManifestAction,
+  createViewAction,
+  updateViewAction,
+  deleteViewAction,
+  createDocAction,
+  updateDocAction,
+  deleteDocAction,
+  createFolderAction,
+  updateFolderAction,
+  deleteFolderAction,
+  createArtifactAction,
+  updateArtifactAction,
+  deleteArtifactAction,
 } from "../state/actions";
 
 /**
@@ -122,7 +137,7 @@ export function createInstanceInContainer({
 }) {
   if (!containerId || !instance?.id) return;
 
-  // atomic optimistic state: adds instance (if missing) AND pushes into container.items
+  // atomic optimistic state: adds instance (if missing) AND pushes into container.occurrences
   dispatch?.(createInstanceInContainerAction({ containerId, instance }));
 
   if (shouldEmit(emit)) {
@@ -178,4 +193,122 @@ export function deleteField({ dispatch, socket, fieldId, emit = true }) {
   if (!fieldId) return;
   dispatch?.(deleteFieldAction(fieldId));
   if (shouldEmit(emit)) socket?.emit("delete_field", { fieldId });
+}
+
+// ===== MANIFEST =====
+export function createManifest({ dispatch, socket, manifest, emit = true }) {
+  if (!manifest?.id) return;
+  dispatch?.(createManifestAction(manifest));
+  if (shouldEmit(emit)) socket?.emit("create_manifest", { manifest });
+}
+export function updateManifest({ dispatch, socket, manifest, emit = true }) {
+  if (!manifest?.id) return;
+  dispatch?.(updateManifestAction(manifest));
+  if (shouldEmit(emit)) socket?.emit("update_manifest", { manifest });
+}
+export function deleteManifest({ dispatch, socket, manifestId, emit = true }) {
+  if (!manifestId) return;
+  dispatch?.(deleteManifestAction(manifestId));
+  if (shouldEmit(emit)) socket?.emit("delete_manifest", { manifestId });
+}
+
+// ===== VIEW =====
+export function createView({ dispatch, socket, view, emit = true }) {
+  if (!view?.id) return;
+  dispatch?.(createViewAction(view));
+  if (shouldEmit(emit)) socket?.emit("create_view", { view });
+}
+export function updateView({ dispatch, socket, view, emit = true }) {
+  if (!view?.id) return;
+  dispatch?.(updateViewAction(view));
+  if (shouldEmit(emit)) socket?.emit("update_view", { view });
+}
+export function deleteView({ dispatch, socket, viewId, emit = true }) {
+  if (!viewId) return;
+  dispatch?.(deleteViewAction(viewId));
+  if (shouldEmit(emit)) socket?.emit("delete_view", { viewId });
+}
+
+// ===== DOC =====
+export function createDoc({ dispatch, socket, doc, emit = true }) {
+  if (!doc?.id) return;
+  dispatch?.(createDocAction(doc));
+  if (shouldEmit(emit)) socket?.emit("create_doc", { doc });
+}
+export function updateDoc({ dispatch, socket, doc, emit = true }) {
+  if (!doc?.id) return;
+  dispatch?.(updateDocAction(doc));
+  if (shouldEmit(emit)) socket?.emit("update_doc", { doc });
+}
+export function deleteDoc({ dispatch, socket, docId, emit = true }) {
+  if (!docId) return;
+  dispatch?.(deleteDocAction(docId));
+  if (shouldEmit(emit)) socket?.emit("delete_doc", { docId });
+}
+
+// ===== FOLDER =====
+export function createFolder({ dispatch, socket, folder, emit = true }) {
+  if (!folder?.id) return;
+  dispatch?.(createFolderAction(folder));
+  if (shouldEmit(emit)) socket?.emit("create_folder", { folder });
+}
+export function updateFolder({ dispatch, socket, folder, emit = true }) {
+  if (!folder?.id) return;
+  dispatch?.(updateFolderAction(folder));
+  if (shouldEmit(emit)) socket?.emit("update_folder", { folder });
+}
+export function deleteFolder({ dispatch, socket, folderId, emit = true }) {
+  if (!folderId) return;
+  dispatch?.(deleteFolderAction(folderId));
+  if (shouldEmit(emit)) socket?.emit("delete_folder", { folderId });
+}
+
+// ===== ARTIFACT =====
+export function createArtifact({ dispatch, socket, artifact, emit = true }) {
+  if (!artifact?.id) return;
+  dispatch?.(createArtifactAction(artifact));
+  if (shouldEmit(emit)) socket?.emit("create_artifact", { artifact });
+}
+export function updateArtifact({ dispatch, socket, artifact, emit = true }) {
+  if (!artifact?.id) return;
+  dispatch?.(updateArtifactAction(artifact));
+  if (shouldEmit(emit)) socket?.emit("update_artifact", { artifact });
+}
+export function deleteArtifact({ dispatch, socket, artifactId, emit = true }) {
+  if (!artifactId) return;
+  dispatch?.(deleteArtifactAction(artifactId));
+  if (shouldEmit(emit)) socket?.emit("delete_artifact", { artifactId });
+}
+
+// ---- templates ----
+export function saveTemplate({ socket, gridId, template }) {
+  if (!gridId || !template?.id) return;
+  socket?.emit("save_template", { gridId, template });
+}
+
+export function fillFromTemplate({ socket, gridId, templateId, containerId, iterationValue }) {
+  if (!gridId || !templateId || !containerId) return;
+  socket?.emit("fill_from_template", { gridId, templateId, containerId, iterationValue });
+}
+
+// ---- file upload ----
+export async function uploadFile({ file, userId, gridId, folderId, manifestId, dispatch }) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("userId", userId);
+  if (gridId) formData.append("gridId", gridId);
+  if (folderId) formData.append("folderId", folderId);
+  if (manifestId) formData.append("manifestId", manifestId);
+
+  try {
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    const data = await res.json();
+    if (data.artifact && dispatch) {
+      dispatch(createArtifactAction(data.artifact));
+    }
+    return data.artifact;
+  } catch (err) {
+    console.error("Upload failed:", err);
+    return null;
+  }
 }

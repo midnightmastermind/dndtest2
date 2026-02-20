@@ -6,6 +6,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@/components/ui/input";
+import { ArrowUp, ArrowDown, Equal } from "lucide-react";
 
 /**
  * FieldPillInput - Click-guarded pill input for field values
@@ -13,27 +14,41 @@ import { Input } from "@/components/ui/input";
  * Props:
  * - field: Field definition { id, name, type, meta: { prefix, postfix } }
  * - value: Current value
+ * - flow: Current flow direction ("in" | "out" | "replace")
  * - onChange: (value) => void - called on each keystroke
  * - onCommit: (value) => void - called on enter/blur
+ * - onFlowChange: (flow) => void - called when flow cycles
  * - disabled: boolean
  * - compact: boolean
  */
 export default function FieldPillInput({
   field,
   value,
+  flow = "in",
   onChange,
   onCommit,
+  onFlowChange,
   disabled = false,
   compact = false,
 }) {
   const [isEditing, setIsEditing] = useState(false);
-  const [localValue, setLocalValue] = useState(value);
   const inputRef = useRef(null);
+
+  // Extract raw value if it's stored as { value, flow } object
+  // This is a safety check in case the value wasn't extracted upstream
+  const extractValue = (v) => {
+    if (v && typeof v === "object" && "value" in v) {
+      return v.value;
+    }
+    return v;
+  };
+
+  const [localValue, setLocalValue] = useState(() => extractValue(value));
 
   // Sync local value with prop
   useEffect(() => {
     if (!isEditing) {
-      setLocalValue(value);
+      setLocalValue(extractValue(value));
     }
   }, [value, isEditing]);
 
@@ -70,7 +85,7 @@ export default function FieldPillInput({
       handleCommit();
     } else if (e.key === "Escape") {
       setIsEditing(false);
-      setLocalValue(value); // Reset to original
+      setLocalValue(extractValue(value)); // Reset to original
     }
   }, [handleCommit, value]);
 
@@ -89,10 +104,23 @@ export default function FieldPillInput({
   const displayValue = localValue ?? (fieldType === "number" ? 0 : "");
   const formattedDisplay = `${prefix}${displayValue}${postfix}`;
 
-  // All input field pills are blue
+  // Pill color reflects flow direction
   const getPillColor = () => {
-    return "bg-blue-500/20 text-blue-300 border-blue-500/30";
+    if (flow === "out") return "bg-red-500/20 text-red-300 border-red-500/30";
+    if (flow === "replace") return "bg-blue-500/20 text-blue-300 border-blue-500/30";
+    return "bg-green-500/20 text-green-300 border-green-500/30"; // "in" default
   };
+
+  const flowIcons = { in: ArrowUp, out: ArrowDown, replace: Equal };
+  const flowLabels = { in: "In (+)", out: "Out (−)", replace: "Replace" };
+  const FlowIcon = flowIcons[flow] || ArrowUp;
+
+  const handleFlowCycle = useCallback((e) => {
+    e.stopPropagation();
+    const cycle = ["in", "out", "replace"];
+    const nextIndex = (cycle.indexOf(flow) + 1) % cycle.length;
+    onFlowChange?.(cycle[nextIndex]);
+  }, [flow, onFlowChange]);
 
   // Input type based on field type
   const getInputType = () => {
@@ -109,6 +137,19 @@ export default function FieldPillInput({
   if (isEditing) {
     return (
       <div className="field-pill-input editing inline-flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={handleFlowCycle}
+          title={`Flow: ${flowLabels[flow]} — click to cycle`}
+          className={`
+            inline-flex items-center justify-center rounded border w-5 h-5 flex-shrink-0 transition-colors
+            ${flow === "out" ? "text-red-400 bg-red-500/20 border-red-500/30" :
+              flow === "replace" ? "text-blue-400 bg-blue-500/20 border-blue-500/30" :
+              "text-green-400 bg-green-500/20 border-green-500/30"}
+          `}
+        >
+          <FlowIcon className="w-3 h-3" />
+        </button>
         {prefix && (
           <span className="text-[10px] text-muted-foreground">{prefix}</span>
         )}
@@ -144,8 +185,14 @@ export default function FieldPillInput({
         ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:brightness-110"}
         ${getPillColor()}
       `}
-      title={fieldName ? `${fieldName}: Click to edit` : "Click to edit"}
+      title={fieldName ? `${fieldName}: ${flowLabels[flow]} — Click to edit` : `${flowLabels[flow]} — Click to edit`}
     >
+      <span
+        onClick={handleFlowCycle}
+        className="inline-flex items-center opacity-70 hover:opacity-100"
+      >
+        <FlowIcon className="w-2.5 h-2.5" />
+      </span>
       {fieldName && <span className="opacity-70">{fieldName}:</span>}
       <span>{formattedDisplay}</span>
     </button>

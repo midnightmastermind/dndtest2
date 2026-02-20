@@ -1,11 +1,12 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import FormInput from "./ui/FormInput";
 import ButtonPopover from "./ui/ButtonPopover";
 import GridLayoutForm from "./ui/GridLayoutForm";
 import IterationNav from "./ui/IterationNav";
+import PanelKindSelector from "./ui/PanelKindSelector";
 
 import { Button } from "./components/ui/button"
-import { Settings, PlusSquare } from "lucide-react";
+import { Settings, PlusSquare, Undo2, Redo2, History } from "lucide-react";
 
 export default function Toolbar({
   gridId,
@@ -31,7 +32,38 @@ export default function Toolbar({
   onSelectIteration,
   currentIterationValue,
   onIterationValueChange,
+  // Category iteration props
+  categoryDimensions,
+  selectedCategoryId,
+  currentCategoryValue,
+  onSelectCategory,
+  onCategoryValueChange,
+  // Undo/Redo/History props
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onHistory,
 }) {
+  const [panelSelectorOpen, setPanelSelectorOpen] = useState(false);
+  const [panelSelectorPos, setPanelSelectorPos] = useState(null);
+  const panelButtonRef = useRef(null);
+
+  const handlePanelButtonClick = () => {
+    if (panelButtonRef.current) {
+      const rect = panelButtonRef.current.getBoundingClientRect();
+      setPanelSelectorPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+      });
+    }
+    setPanelSelectorOpen(true);
+  };
+
+  const handlePanelKindSelect = (kind) => {
+    onAddPanel?.(kind);
+    setPanelSelectorOpen(false);
+  };
   const gridOptions = useMemo(
     () =>
       (availableGrids || []).map((g) => {
@@ -146,13 +178,21 @@ export default function Toolbar({
             />
           </div>
           <Button
+            ref={panelButtonRef}
             size="sm"
-            onClick={() => onAddPanel?.()}
+            onClick={handlePanelButtonClick}
           >
-
             <PlusSquare className="h-4 w-4 pr-[2px]" />Panel
           </Button>
         </div>
+
+        {/* Panel Kind Selector Popup */}
+        <PanelKindSelector
+          open={panelSelectorOpen}
+          onClose={() => setPanelSelectorOpen(false)}
+          onSelect={handlePanelKindSelect}
+          position={panelSelectorPos}
+        />
 
         {/* Center: Iteration Navigation */}
         {iterations?.length > 0 && (
@@ -165,13 +205,78 @@ export default function Toolbar({
           />
         )}
 
-        {/* Right: + Grid */}
-        <div style={{ display: "flex", alignItems: "center", marginLeft: "auto", gap: 10 }}>
+        {/* Category Filter (compound iteration) */}
+        {categoryDimensions?.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span className="text-[10px] text-muted-foreground">Filter:</span>
+            <select
+              value={selectedCategoryId || ""}
+              onChange={(e) => onSelectCategory?.(e.target.value || null)}
+              className="h-7 text-xs bg-background border border-border rounded px-1 text-foreground"
+              style={{ fontSize: 11 }}
+              title="Filter by category dimension"
+            >
+              <option value="">No Filter</option>
+              {categoryDimensions.map(cat => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+            {selectedCategoryId && (() => {
+              const dim = categoryDimensions.find(c => c.id === selectedCategoryId);
+              const opts = dim?.options || dim?.categoryOptions || [];
+              return opts.length > 0 ? (
+                <select
+                  value={currentCategoryValue || ""}
+                  onChange={(e) => onCategoryValueChange?.(e.target.value || null)}
+                  className="h-7 text-xs bg-background border border-border rounded px-1 text-foreground"
+                  style={{ fontSize: 11 }}
+                  title={`Filter ${dim?.name || "category"} value`}
+                >
+                  <option value="">All {dim?.name || "Values"}</option>
+                  {opts.map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              ) : null;
+            })()}
+          </div>
+        )}
+
+        {/* Right: Undo/History/Redo + Grid */}
+        <div style={{ display: "flex", alignItems: "center", marginLeft: "auto", gap: 4 }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onHistory}
+            title="Transaction History"
+          >
+            <History className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo2 className="h-4 w-4" />
+          </Button>
+
+          <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.2)", margin: "0 4px" }} />
+
           <Button
             size="sm"
             onClick={() => onCreateNewGrid?.()}
           >
-
             <PlusSquare className="h-4 w-4 pr-[2px]" />Grid
           </Button>
         </div>

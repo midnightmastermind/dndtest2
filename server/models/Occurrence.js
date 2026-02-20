@@ -12,7 +12,7 @@ const OccurrenceSchema = new mongoose.Schema(
     targetType: {
       type: String,
       required: true,
-      enum: ["panel", "container", "instance"],
+      enum: ["panel", "container", "instance", "doc"],
       index: true
     },
     targetId: { type: String, required: true, index: true },
@@ -21,10 +21,37 @@ const OccurrenceSchema = new mongoose.Schema(
     gridId: { type: String, required: true, index: true },
 
     // Iteration context (for filtering/time-travel later)
+    // Supports COMPOUND iterations: time-based + category-based simultaneously
     iteration: {
+      // Legacy single-key format (backwards compatible)
       key: { type: String, default: "time" },  // "time" | "version" | "category" | custom
-      value: { type: mongoose.Schema.Types.Mixed },  // Date, string, number, etc
-      range: { type: mongoose.Schema.Types.Mixed }   // Optional for ranges
+      value: { type: mongoose.Schema.Types.Mixed },  // Date, string, number, etc - null means "all iterations"
+      range: { type: mongoose.Schema.Types.Mixed },  // Optional for ranges
+
+      // TIME-BASED iteration (when in time, e.g., daily/weekly/monthly)
+      timeValue: { type: Date },  // The specific date
+      timeFilter: { type: String, enum: ["daily", "weekly", "monthly", "yearly", "all"] },
+
+      // CATEGORY-BASED iteration (what category, e.g., "work", "personal")
+      categoryKey: { type: String },   // e.g., "project", "context", "tag"
+      categoryValue: { type: String }, // e.g., "work", "personal", "health"
+
+      // Inheritance mode: does this entity use parent's iteration or its own?
+      // "inherit" - Use parent's iteration context (grid → panel → container → instance)
+      // "own" - Use this entity's own iteration settings (enables local navigation arrows)
+      inheritMode: { type: String, enum: ["inherit", "own"], default: "inherit" },
+
+      // Persistence mode: how this occurrence behaves across iterations
+      // "persistent" - Shows on ALL iterations (templates, habits in toolkit)
+      // "specific" - Only shows on the specific iteration.value date
+      // "untilDone" - Shows on all iterations until completed, then becomes specific
+      mode: { type: String, enum: ["persistent", "specific", "untilDone"], default: "specific" },
+
+      // When mode="untilDone" and item is completed, this records when
+      completedOn: { type: Date },
+
+      // For "untilDone" mode: which field to check for completion
+      completionFieldId: { type: String },
     },
 
     // Timestamp for this occurrence
@@ -41,6 +68,15 @@ const OccurrenceSchema = new mongoose.Schema(
     // Optional snapshot of field values (for UI convenience)
     // Actual field values can also be computed from transactions in Phase 3
     fields: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+    // Doc content (for doc container occurrences)
+    // Stores Tiptap/ProseMirror JSON document structure
+    // Each occurrence can have its own content (e.g., different day pages)
+    docContent: { type: mongoose.Schema.Types.Mixed, default: null },
+
+    // Copylink: linked occurrence ID — when set, field edits propagate to all
+    // occurrences sharing the same linkedGroupId
+    linkedGroupId: { type: String, default: null, index: true },
 
     // Optional metadata
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },

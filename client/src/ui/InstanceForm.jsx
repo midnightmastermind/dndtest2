@@ -6,8 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import FormInput from "./FormInput";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import MultiSelectPills from "./MultiSelectPills";
+import IterationSettings from "./IterationSettings";
+import StyleEditor from "./StyleEditor";
 import { GridActionsContext } from "../GridActionsContext";
 import * as CommitHelpers from "../helpers/CommitHelpers";
 import { uid } from "../uid";
@@ -41,6 +43,7 @@ const ITER_TIME_FILTER_OPTIONS = [
 const DRAG_MODE_OPTIONS = [
   { value: "move", label: "Move (relocate occurrence)" },
   { value: "copy", label: "Copy (create new occurrence)" },
+  { value: "copylink", label: "Copylink (linked occurrence)" },
 ];
 
 export default function InstanceForm({
@@ -50,12 +53,34 @@ export default function InstanceForm({
   onDeleteInstance, // () => void
   instanceId,
   instance,         // Full instance object with fieldBindings
+  occurrence,       // The occurrence (for iteration/persistence settings)
   iteration,        // { mode, timeFilter }
   onIterationChange, // (next) => void
   dispatch,
   socket,
 }) {
   const { fieldsById, containersById, panelsById } = useContext(GridActionsContext);
+
+  // Handle occurrence updates (for persistence mode)
+  const handleOccurrenceUpdate = useCallback((updates) => {
+    if (!occurrence?.id) return;
+
+    const updatedOccurrence = {
+      ...occurrence,
+      ...updates,
+      iteration: {
+        ...(occurrence.iteration || {}),
+        ...(updates.iteration || {}),
+      },
+    };
+
+    CommitHelpers.updateOccurrence({
+      dispatch,
+      socket,
+      occurrence: updatedOccurrence,
+      emit: true,
+    });
+  }, [occurrence, dispatch, socket]);
 
   // Local state for field bindings being edited
   const [localBindings, setLocalBindings] = useState(() =>
@@ -127,6 +152,82 @@ export default function InstanceForm({
         />
       </div>
 
+      {/* Auto-check on drop */}
+      <div className="flex items-center justify-between gap-2 py-1 px-1">
+        <Label className="text-xs">Auto-check on drop</Label>
+        <Switch
+          checked={instance?.meta?.autoCheckOnDrop || false}
+          onCheckedChange={(checked) => {
+            if (instance) {
+              CommitHelpers.updateInstance({
+                dispatch,
+                socket,
+                instance: {
+                  id: instance.id,
+                  meta: { ...(instance.meta || {}), autoCheckOnDrop: checked },
+                },
+                emit: true,
+              });
+            }
+          }}
+        />
+      </div>
+
+      <Separator />
+
+      {/* Sibling Links */}
+      <SiblingLinksSection
+        instance={instance}
+        dispatch={dispatch}
+        socket={socket}
+      />
+
+      <Separator />
+
+      {/* Iteration/Persistence Settings */}
+      {occurrence && (
+        <>
+          <div className="py-2">
+            <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Iteration</h4>
+            <IterationSettings
+              occurrence={occurrence}
+              onUpdate={handleOccurrenceUpdate}
+              entityType="instance"
+              compact
+            />
+          </div>
+          <Separator />
+        </>
+      )}
+
+      {/* Instance Style */}
+      <StyleEditor
+        styleMode={instance?.styleMode || "inherit"}
+        ownStyle={instance?.ownStyle}
+        onStyleModeChange={(mode) => {
+          if (instance) {
+            CommitHelpers.updateInstance({
+              dispatch,
+              socket,
+              instance: { id: instance.id, styleMode: mode },
+              emit: true,
+            });
+          }
+        }}
+        onOwnStyleChange={(style) => {
+          if (instance) {
+            CommitHelpers.updateInstance({
+              dispatch,
+              socket,
+              instance: { id: instance.id, ownStyle: style },
+              emit: true,
+            });
+          }
+        }}
+        label="Instance Style"
+        inheritLabel="Container / Panel"
+      />
+
       <Separator />
 
       {/* Fields Section */}
@@ -167,6 +268,100 @@ export default function InstanceForm({
             Delete Instance
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * SiblingLinksSection - Manage sibling link IDs on an instance
+ */
+function SiblingLinksSection({ instance, dispatch, socket }) {
+  const [newSiblingId, setNewSiblingId] = useState("");
+
+  const siblingLinks = instance?.siblingLinks || [];
+
+  const handleAdd = useCallback(() => {
+    const trimmed = newSiblingId.trim();
+    if (!trimmed || !instance) return;
+    if (siblingLinks.includes(trimmed)) {
+      setNewSiblingId("");
+      return;
+    }
+    const updated = [...siblingLinks, trimmed];
+    CommitHelpers.updateInstance({
+      dispatch,
+      socket,
+      instance: { id: instance.id, siblingLinks: updated },
+      emit: true,
+    });
+    setNewSiblingId("");
+  }, [newSiblingId, instance, siblingLinks, dispatch, socket]);
+
+  const handleRemove = useCallback((linkId) => {
+    if (!instance) return;
+    const updated = siblingLinks.filter((id) => id !== linkId);
+    CommitHelpers.updateInstance({
+      dispatch,
+      socket,
+      instance: { id: instance.id, siblingLinks: updated },
+      emit: true,
+    });
+  }, [instance, siblingLinks, dispatch, socket]);
+
+  return (
+    <div className="py-2">
+      <h4 className="text-xs font-semibold text-foregroundScale-2 mb-2">Sibling Links</h4>
+
+      {siblingLinks.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {siblingLinks.map((linkId) => (
+            <span
+              key={linkId}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-full bg-muted/50 text-muted-foreground border border-border"
+            >
+              {linkId.length > 12 ? `${linkId.slice(0, 12)}...` : linkId}
+              <button
+                type="button"
+                className="hover:text-red-400 transition-colors"
+                onClick={() => handleRemove(linkId)}
+                aria-label={`Remove sibling ${linkId}`}
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {siblingLinks.length === 0 && (
+        <p className="text-[10px] text-foregroundScale-2/80 mb-2">No sibling links yet.</p>
+      )}
+
+      <div className="flex items-center gap-1">
+        <Input
+          type="text"
+          value={newSiblingId}
+          onChange={(e) => setNewSiblingId(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleAdd();
+            }
+          }}
+          placeholder="Sibling instance ID"
+          className="h-6 text-xs flex-1"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 text-[10px] px-2"
+          onClick={handleAdd}
+          disabled={!newSiblingId.trim()}
+        >
+          Add
+        </Button>
       </div>
     </div>
   );

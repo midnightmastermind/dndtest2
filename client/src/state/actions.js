@@ -29,7 +29,7 @@ export const ActionTypes = {
   UPDATE_CONTAINER: "UPDATE_CONTAINER",
   DELETE_CONTAINER: "DELETE_CONTAINER",
   SET_CONTAINERS: "SET_CONTAINERS",
-  UPDATE_CONTAINER_ITEMS: "UPDATE_CONTAINER_ITEMS",
+  UPDATE_CONTAINER_OCCURRENCES: "UPDATE_CONTAINER_OCCURRENCES",
 
   CREATE_INSTANCE: "CREATE_INSTANCE",
   UPDATE_INSTANCE: "UPDATE_INSTANCE",
@@ -47,6 +47,31 @@ export const ActionTypes = {
   UPDATE_FIELD: "UPDATE_FIELD",
   DELETE_FIELD: "DELETE_FIELD",
   SET_FIELDS: "SET_FIELDS",
+
+  // ---- manifests ----
+  CREATE_MANIFEST: "CREATE_MANIFEST",
+  UPDATE_MANIFEST: "UPDATE_MANIFEST",
+  DELETE_MANIFEST: "DELETE_MANIFEST",
+
+  // ---- views ----
+  CREATE_VIEW: "CREATE_VIEW",
+  UPDATE_VIEW: "UPDATE_VIEW",
+  DELETE_VIEW: "DELETE_VIEW",
+
+  // ---- docs ----
+  CREATE_DOC: "CREATE_DOC",
+  UPDATE_DOC: "UPDATE_DOC",
+  DELETE_DOC: "DELETE_DOC",
+
+  // ---- folders ----
+  CREATE_FOLDER: "CREATE_FOLDER",
+  UPDATE_FOLDER: "UPDATE_FOLDER",
+  DELETE_FOLDER: "DELETE_FOLDER",
+
+  // ---- artifacts ----
+  CREATE_ARTIFACT: "CREATE_ARTIFACT",
+  UPDATE_ARTIFACT: "UPDATE_ARTIFACT",
+  DELETE_ARTIFACT: "DELETE_ARTIFACT",
 
   SET_ACTIVE_ID: "SET_ACTIVE_ID",
   SET_ACTIVE_SIZE: "SET_ACTIVE_SIZE",
@@ -142,7 +167,7 @@ export const deleteContainerAction = (containerId) => ({
 });
 
 export const updateContainerItemsAction = ({ containerId, items }) => ({
-  type: ActionTypes.UPDATE_CONTAINER_ITEMS,
+  type: ActionTypes.UPDATE_CONTAINER_OCCURRENCES,
   payload: { containerId, items },
 });
 
@@ -228,4 +253,74 @@ export const setActiveSizeAction = (activeSize) => ({
 
 export const softTickAction = () => ({
   type: ActionTypes.SOFT_TICK,
+});
+
+// ---- manifests ----
+export const createManifestAction = (manifest) => ({
+  type: ActionTypes.CREATE_MANIFEST,
+  payload: { manifest },
+});
+export const updateManifestAction = (manifest) => ({
+  type: ActionTypes.UPDATE_MANIFEST,
+  payload: { manifest },
+});
+export const deleteManifestAction = (manifestId) => ({
+  type: ActionTypes.DELETE_MANIFEST,
+  payload: { manifestId },
+});
+
+// ---- views ----
+export const createViewAction = (view) => ({
+  type: ActionTypes.CREATE_VIEW,
+  payload: { view },
+});
+export const updateViewAction = (view) => ({
+  type: ActionTypes.UPDATE_VIEW,
+  payload: { view },
+});
+export const deleteViewAction = (viewId) => ({
+  type: ActionTypes.DELETE_VIEW,
+  payload: { viewId },
+});
+
+// ---- docs ----
+export const createDocAction = (doc) => ({
+  type: ActionTypes.CREATE_DOC,
+  payload: { doc },
+});
+export const updateDocAction = (doc) => ({
+  type: ActionTypes.UPDATE_DOC,
+  payload: { doc },
+});
+export const deleteDocAction = (docId) => ({
+  type: ActionTypes.DELETE_DOC,
+  payload: { docId },
+});
+
+// ---- folders ----
+export const createFolderAction = (folder) => ({
+  type: ActionTypes.CREATE_FOLDER,
+  payload: { folder },
+});
+export const updateFolderAction = (folder) => ({
+  type: ActionTypes.UPDATE_FOLDER,
+  payload: { folder },
+});
+export const deleteFolderAction = (folderId) => ({
+  type: ActionTypes.DELETE_FOLDER,
+  payload: { folderId },
+});
+
+// ---- artifacts ----
+export const createArtifactAction = (artifact) => ({
+  type: ActionTypes.CREATE_ARTIFACT,
+  payload: { artifact },
+});
+export const updateArtifactAction = (artifact) => ({
+  type: ActionTypes.UPDATE_ARTIFACT,
+  payload: { artifact },
+});
+export const deleteArtifactAction = (artifactId) => ({
+  type: ActionTypes.DELETE_ARTIFACT,
+  payload: { artifactId },
 });

@@ -8,18 +8,22 @@ import React, { useMemo, useCallback, useState, useEffect, useContext } from "re
 import { Button } from "@/components/ui/button";
 
 import SortableInstance from "./SortableInstance";
-import { Settings, PlusSquare, GripVertical, Copy } from "lucide-react";
+import DocContainer from "./docs/DocContainer";
+import { Settings, PlusSquare, GripVertical, Copy, Link2 } from "lucide-react";
 import ButtonPopover from "./ui/ButtonPopover";
 import ContainerForm from "./ui/ContainerForm";
 import RadialMenu from "./ui/RadialMenu";
+import LocalIterationNav from "./ui/LocalIterationNav";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { GridActionsContext } from "./GridActionsContext";
 import * as CommitHelpers from "./helpers/CommitHelpers";
 import { getContainerItems, getContainerItemsWithOccurrences } from "./helpers/LayoutHelpers";
 import { useDragDrop, useDroppable, useDragContext, DragType, DropAccepts } from "./helpers/dragSystem";
+import { resolveContainerStyle, resolveInstanceStyle, styleToCSS } from "./helpers/StyleHelpers";
 
 function SortableContainer({
   container,
+  panel,
   panelId,
   panelLayoutOrientation = 'vertical',
   addInstanceToContainer,
@@ -27,11 +31,12 @@ function SortableContainer({
   dispatch,
   socket,
   gapPx = 12,
+  onInstanceFocus,
 }) {
   // ============================================================
   // CONTEXT
   // ============================================================
-  const { occurrencesById, instancesById } = useContext(GridActionsContext);
+  const { occurrencesById, instancesById, state: ctxState } = useContext(GridActionsContext);
   const dragCtx = useDragContext();
   const { isContainerDrag, isInstanceDrag, isExternalDrag, isPanelDrag, dragMode, toggleDragMode } = dragCtx;
 
@@ -69,6 +74,83 @@ function SortableContainer({
   const commitDragMode = useCallback((nextMode) => {
     CommitHelpers.updateContainer({ dispatch, socket, container: { ...container, defaultDragMode: nextMode }, emit: true });
   }, [container, dispatch, socket]);
+
+  // Find the occurrence for this container (for persistence settings)
+  const containerOccurrence = useMemo(() => {
+    return Object.values(occurrencesById).find(
+      occ => occ.targetType === "container" && occ.targetId === container.id
+    );
+  }, [occurrencesById, container.id]);
+
+  const commitOccurrenceUpdate = useCallback((updates) => {
+    if (!containerOccurrence?.id) return;
+    CommitHelpers.updateOccurrence({
+      dispatch,
+      socket,
+      occurrence: { id: containerOccurrence.id, ...updates },
+      emit: true,
+    });
+  }, [containerOccurrence, dispatch, socket]);
+
+  // Resolved cascading style for this container
+  const resolvedContainerCSS = useMemo(
+    () => styleToCSS(resolveContainerStyle(container, panel)),
+    [container, panel]
+  );
+
+  const commitContainerStyleUpdate = useCallback((updates) => {
+    CommitHelpers.updateContainer({
+      dispatch,
+      socket,
+      container: { ...container, ...updates },
+      emit: true,
+    });
+  }, [container, dispatch, socket]);
+
+  // Templates
+  const ctxGrid = ctxState?.grid;
+  const gridTemplates = useMemo(() => ctxGrid?.templates || [], [ctxGrid?.templates]);
+
+  const handleSaveAsTemplate = useCallback(() => {
+    const gridId = ctxGrid?._id;
+    if (!gridId) return;
+
+    const items = (container.occurrences || []).map(occId => {
+      const occ = occurrencesById[occId];
+      if (!occ) return null;
+      return {
+        instanceId: occ.targetId,
+        fieldDefaults: occ.fields || {},
+        // Preserve linkedGroupId so template fills maintain copy-links
+        ...(occ.linkedGroupId ? { linkedGroupId: occ.linkedGroupId } : {}),
+      };
+    }).filter(Boolean);
+
+    const templateName = window.prompt("Template name:", container.label || "Template");
+    if (!templateName) return;
+
+    CommitHelpers.saveTemplate({
+      socket,
+      gridId,
+      template: {
+        id: crypto.randomUUID(),
+        name: templateName,
+        items,
+        createdAt: new Date(),
+      },
+    });
+  }, [container, occurrencesById, ctxGrid, socket]);
+
+  const handleFillFromTemplate = useCallback((templateId) => {
+    const gridId = ctxGrid?._id;
+    if (!gridId) return;
+    CommitHelpers.fillFromTemplate({
+      socket,
+      gridId,
+      templateId,
+      containerId: container.id,
+    });
+  }, [ctxGrid, container.id, socket]);
 
   // ============================================================
   // LAYOUT DETECTION
@@ -172,6 +254,7 @@ function SortableContainer({
         zIndex: isDragging ? 0 : 1,
         opacity: isDragging ? 0.4 : 1,
         transition: "opacity 0.15s, outline 0.1s",
+        ...resolvedContainerCSS,
       }}
       {...containerProps}
     >
@@ -272,18 +355,38 @@ function SortableContainer({
               onCommitLabel={commitLabel}
               onDeleteContainer={deleteMe}
               containerId={container.id}
+              container={container}
+              onContainerUpdate={commitContainerStyleUpdate}
               iteration={container.iteration}
               onIterationChange={commitIteration}
               defaultDragMode={container.defaultDragMode}
               onDragModeChange={commitDragMode}
+              occurrence={containerOccurrence}
+              onOccurrenceUpdate={commitOccurrenceUpdate}
+              onSaveAsTemplate={handleSaveAsTemplate}
+              onFillFromTemplate={handleFillFromTemplate}
+              templates={gridTemplates}
             />
           </PopoverContent>
         </Popover>
 
         {/* label */}
-        <span className="text-xs font-medium flex-1 pl-1 truncate">
+        <span className="text-xs font-medium pl-1 truncate flex items-center gap-1">
           {container.label || "Container"}
+          {containerOccurrence?.linkedGroupId && (
+            <Link2 className="w-3 h-3 text-blue-400 opacity-60 flex-shrink-0" title="Linked" />
+          )}
         </span>
+
+        {/* Local iteration navigation for this container */}
+        <div className="ml-auto mr-1" onPointerDown={(e) => e.stopPropagation()}>
+          <LocalIterationNav
+            occurrence={containerOccurrence}
+            onUpdate={commitOccurrenceUpdate}
+            showModeToggle={true}
+            compact={true}
+          />
+        </div>
 
         {/* Top insert indicator stays exactly as you had it */}
         {isHeaderOver && (isInstanceDrag || isExternalDrag) && items.length > 0 && (
@@ -303,90 +406,103 @@ function SortableContainer({
       </div>
 
 
-      {/* LIST - Droppable */}
-      <div
-        ref={listDropRef}
-        className="container-list"
-        style={{
-          flex: items.length === 0 ? 1 : "0 0 auto",
-          minHeight: items.length === 0 ? 40 : "fit-content",
-          overflow: "auto",
-          padding: 0,
-          display: "flex",
-          flexDirection: "column",
-          position: "relative",
-        }}
-      >
-        {/* Always-visible pocket background */}
+      {/* CONTENT AREA - Doc or List based on container.kind */}
+      {container.kind === "doc" ? (
+        /* Doc Container - Rich text editor */
         <div
+          ref={listDropRef}
+          className="container-doc"
           style={{
-            position: "absolute",
-            top: "5px",
-            left: "5px",
-            right: "5px",
-            bottom: items.length === 0 ? "8px" : "36px",
-            minHeight: items.length === 0 ? "36px" : 0,
-            borderRadius: "4px",
-            background: "rgba(20, 25, 30, 0.4)",
-            border: "1px solid rgba(0, 0, 0, 0.5)",
-            boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
-            pointerEvents: "none",
-            zIndex: 0,
+            flex: 1,
+            minHeight: 100,
+            overflow: "auto",
+            position: "relative",
           }}
-        />
-
-        {/* Bottom drop indicator - when hovering empty space at bottom 
-        {isListOver && (isInstanceDrag || isExternalDrag) && items.length > 0 && (
+        >
+          <DocContainer
+            container={container}
+            occurrence={containerOccurrence}
+            dispatch={dispatch}
+            socket={socket}
+            isHot={isHot}
+          />
+        </div>
+      ) : (
+        /* List Container - Standard instance list */
+        <div
+          ref={listDropRef}
+          className="container-list"
+          style={{
+            flex: items.length === 0 ? 1 : "0 0 auto",
+            minHeight: items.length === 0 ? 40 : "fit-content",
+            overflow: "auto",
+            padding: 0,
+            display: "flex",
+            flexDirection: "column",
+            position: "relative",
+          }}
+        >
+          {/* Always-visible pocket background */}
           <div
             style={{
               position: "absolute",
-              bottom: 5,
-              left: 9,
-              right: 9,
-              height: 2,
-              backgroundColor: "rgb(50, 150, 255)",
-              borderRadius: 1,
-              zIndex: 10,
+              top: "5px",
+              left: "5px",
+              right: "5px",
+              bottom: items.length === 0 ? "8px" : "36px",
+              minHeight: items.length === 0 ? "36px" : 0,
+              borderRadius: "4px",
+              background: "rgba(20, 25, 30, 0.4)",
+              border: "1px solid rgba(0, 0, 0, 0.5)",
+              boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
               pointerEvents: "none",
+              zIndex: 0,
             }}
           />
-        )}*/}
 
-        <div style={{ position: "relative", zIndex: 1, padding: "5px", flex: 1, display: "flex", flexDirection: "column" }}>
-          {itemsWithOccurrences.map(({ instance, occurrence }) => (
-            <SortableInstance
-              key={instance.id}
-              instance={instance}
-              occurrence={occurrence}
-              containerId={container.id}
-              panelId={panelId}
-              dispatch={dispatch}
-              socket={socket}
-              allowedEdges={containerAllowedEdges}
-            />
-          ))}
+          <div
+            role="list"
+            aria-label={`${container.label || "Container"} items`}
+            style={{ position: "relative", zIndex: 1, padding: "5px", flex: 1, display: "flex", flexDirection: "column" }}
+          >
+            {itemsWithOccurrences.map(({ instance, occurrence }) => (
+              <SortableInstance
+                key={instance.id}
+                instance={instance}
+                occurrence={occurrence}
+                containerId={container.id}
+                panelId={panelId}
+                panel={panel}
+                container={container}
+                dispatch={dispatch}
+                socket={socket}
+                allowedEdges={containerAllowedEdges}
+                onInstanceFocus={onInstanceFocus}
+              />
+            ))}
 
-          {items.length === 0 && (
-            <div
-              className="text-xs text-muted-foreground p-2 text-center"
-              style={{
-                fontStyle: "italic",
-                opacity: 0.6,
-                position: "relative",
-                zIndex: 2,
-                marginTop: "-5px",
-                minHeight: "36px",
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              Drop items here
-            </div>
-          )}
+            {items.length === 0 && (
+              <div
+                className="text-xs text-muted-foreground p-2 text-center"
+                style={{
+                  fontStyle: "italic",
+                  opacity: 0.6,
+                  position: "relative",
+                  zIndex: 2,
+                  marginTop: "-5px",
+                  minHeight: "36px",
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                Drop items here
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Invisible hitbox extending into gap below container */}
       <div

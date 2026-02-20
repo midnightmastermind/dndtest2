@@ -11,18 +11,17 @@ export const PopoverContent = React.forwardRef(
       <PopoverPrimitive.Content
         ref={ref}
         align={align}
-        collisionPadding={0}   // try 0 or 8
-        avoidCollisions={true} // default true
+        collisionPadding={16}  // ✅ Keep 16px from screen edges
+        avoidCollisions={true} // ✅ Flip/shift to stay on screen
         sideOffset={sideOffset}
         className={cn(
-          // ✅ no fixed width here
-          "z-50  p-3 sm:p-5 rounded border border-borderScale-0 bg-popoverScale-2 text-popover-foreground shadow-md outline-none",
-          // ✅ never exceed viewport width
-          "max-w-[calc(100vw)]",
-          // ✅ nice responsive width behavior
-          "w-[min(520px,calc(100vw))]",
-          // ✅ optional: prevent tall forms from falling off screen
-          "max-h-[calc(100vh-24px)] overflow-auto",
+          // ✅ High z-index to appear above panels (which can be 60-1000)
+          "z-[10000] p-3 rounded border border-borderScale-0 bg-popoverScale-2 text-popover-foreground shadow-md outline-none",
+          // ✅ Compact width - reduced from 520px to 340px
+          "max-w-[calc(100vw-32px)]",
+          "w-[min(340px,calc(100vw-32px))]",
+          // ✅ Prevent overflow on small screens
+          "max-h-[calc(100vh-32px)] overflow-auto",
           className
         )}
         {...props}

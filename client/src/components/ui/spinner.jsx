@@ -31,7 +31,8 @@ export function Spinner({ size = "md", className }) {
 
 export function SpinnerOverlay({ label = "Loading…" }) {
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/60 backdrop-blur-sm gap-4">
+      <img src="/moduli_logo_true_vector.svg" alt="Moduli" className="w-16 h-16 opacity-80" />
       <div className="flex items-center gap-3 rounded-md border border-border bg-background px-4 py-2 shadow-lg">
         <Spinner />
         <span className="text-sm text-muted-foreground">{label}</span>

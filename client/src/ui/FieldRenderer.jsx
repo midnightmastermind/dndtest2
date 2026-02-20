@@ -40,17 +40,17 @@ function FieldRenderer({
   socket,
   compact = false,
 }) {
-  // Get current value from occurrence.fields
-  // Values are stored as { value, flow } objects, so extract the raw value
-  const value = useMemo(() => {
-    if (!occurrence?.fields || !field?.id) return undefined;
+  // Get current value and flow from occurrence.fields
+  // Values are stored as { value, flow } objects
+  const { value, flow: currentFlow } = useMemo(() => {
+    if (!occurrence?.fields || !field?.id) return { value: undefined, flow: "in" };
     const storedValue = occurrence.fields[field.id];
     // Handle both old format (raw value) and new format ({ value, flow })
     if (storedValue && typeof storedValue === "object" && "value" in storedValue) {
-      return storedValue.value;
+      return { value: storedValue.value, flow: storedValue.flow || "in" };
     }
-    return storedValue;
-  }, [occurrence?.fields, field?.id]);
+    return { value: storedValue, flow: field?.meta?.flow || "in" };
+  }, [occurrence?.fields, field?.id, field?.meta?.flow]);
 
   // Handle value change - update occurrence.fields
   const handleChange = useCallback((newValue) => {
@@ -58,12 +58,11 @@ function FieldRenderer({
   }, []);
 
   // Handle value commit - persist to server
-  const handleCommit = useCallback((newValue) => {
+  const handleCommit = useCallback((newValue, flowOverride) => {
     if (!occurrence?.id || !field?.id) return;
 
-    // Get the flow from the field's meta (for input fields)
-    // Store as { value, flow } format for proper aggregation support
-    const flow = field?.meta?.flow || "in";
+    // Use override flow if provided, otherwise use current stored flow, then field default
+    const flow = flowOverride || currentFlow || field?.meta?.flow || "in";
     const fieldValue = field.mode === "input"
       ? { value: newValue, flow }
       : newValue;
@@ -73,7 +72,6 @@ function FieldRenderer({
       [field.id]: fieldValue,
     };
 
-    // Update occurrence with new field value
     CommitHelpers.updateOccurrence({
       dispatch,
       socket,
@@ -83,7 +81,30 @@ function FieldRenderer({
       },
       emit: true,
     });
-  }, [occurrence, field?.id, field?.meta?.flow, field?.mode, dispatch, socket]);
+  }, [occurrence, field?.id, currentFlow, field?.meta?.flow, field?.mode, dispatch, socket]);
+
+  // Handle flow direction change (cycle through in → out → replace)
+  const handleFlowChange = useCallback((newFlow) => {
+    if (!occurrence?.id || !field?.id) return;
+    const storedValue = occurrence.fields?.[field.id];
+    const currentValue = storedValue && typeof storedValue === "object" && "value" in storedValue
+      ? storedValue.value : storedValue;
+
+    const updatedFields = {
+      ...((occurrence.fields) || {}),
+      [field.id]: { value: currentValue, flow: newFlow },
+    };
+
+    CommitHelpers.updateOccurrence({
+      dispatch,
+      socket,
+      occurrence: {
+        id: occurrence.id,
+        fields: updatedFields,
+      },
+      emit: true,
+    });
+  }, [occurrence, field?.id, dispatch, socket]);
 
   if (!field) return null;
 
@@ -107,13 +128,30 @@ function FieldRenderer({
       );
     }
 
-    // Input fields in compact mode use pill input (click to edit)
+    // Boolean fields should render as checkboxes even in compact mode
+    // Select fields need FieldInput for dropdown/multiselect rendering
+    if (field.type === "boolean" || field.type === "select") {
+      return (
+        <FieldInput
+          field={field}
+          binding={binding}
+          value={value}
+          onChange={handleChange}
+          onCommit={handleCommit}
+          compact={true}
+        />
+      );
+    }
+
+    // Other input fields in compact mode use pill input (click to edit)
     return (
       <FieldPillInput
         field={field}
         value={value}
+        flow={currentFlow}
         onChange={handleChange}
         onCommit={handleCommit}
+        onFlowChange={handleFlowChange}
         compact={compact}
       />
     );
@@ -163,8 +201,10 @@ function FieldRenderer({
           field={field}
           binding={binding}
           value={value}
+          flow={currentFlow}
           onChange={handleChange}
           onCommit={handleCommit}
+          onFlowChange={handleFlowChange}
           compact={compact}
         />
       </div>
@@ -177,8 +217,10 @@ function FieldRenderer({
       field={field}
       binding={binding}
       value={value}
+      flow={currentFlow}
       onChange={handleChange}
       onCommit={handleCommit}
+      onFlowChange={handleFlowChange}
       compact={compact}
     />
   );

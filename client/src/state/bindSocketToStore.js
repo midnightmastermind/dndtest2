@@ -8,6 +8,10 @@
 import { ActionTypes } from "./actions";
 
 export function bindSocketToStore(socket, dispatch) {
+  // Wrap dispatch to tag all socket-originated actions
+  // This prevents BroadcastChannel from re-broadcasting server events
+  const socketDispatch = (action) => dispatch({ ...action, _fromSocket: true });
+
   // ======================================================
   // FULL STATE HYDRATE
   // ======================================================
@@ -19,7 +23,7 @@ export function bindSocketToStore(socket, dispatch) {
       localStorage.setItem("moduli-gridId", payload.gridId);
     }
 
-    dispatch({ type: ActionTypes.FULL_STATE, payload });
+    socketDispatch({ type: ActionTypes.FULL_STATE, payload });
   }
 
   socket.on("full_state", onFullState);
@@ -30,18 +34,19 @@ export function bindSocketToStore(socket, dispatch) {
   function onContainerCreated({ container } = {}) {
     if (!container?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.CREATE_CONTAINER,
       payload: { container },
     });
   }
 
-  function onContainerItemsUpdated({ containerId, items } = {}) {
-    if (!containerId || !Array.isArray(items)) return;
+  function onContainerItemsUpdated({ containerId, items, occurrences } = {}) {
+    const occList = occurrences || items;
+    if (!containerId || !Array.isArray(occList)) return;
 
-    dispatch({
-      type: ActionTypes.UPDATE_CONTAINER_ITEMS,
-      payload: { containerId, items },
+    socketDispatch({
+      type: ActionTypes.UPDATE_CONTAINER_OCCURRENCES,
+      payload: { containerId, occurrences: occList },
     });
   }
 
@@ -50,7 +55,7 @@ export function bindSocketToStore(socket, dispatch) {
     const id = container?.id || payload.containerId;
     if (!id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_CONTAINER,
       payload: { container: { ...container, id } },
     });
@@ -60,7 +65,7 @@ export function bindSocketToStore(socket, dispatch) {
     const containerId = payload.containerId || payload.id;
     if (!containerId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_CONTAINER,
       payload: { containerId },
     });
@@ -77,7 +82,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onInstanceCreatedInContainer({ containerId, instance } = {}) {
     if (!containerId || !instance?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.CREATE_INSTANCE_IN_CONTAINER,
       payload: { containerId, instance },
     });
@@ -86,7 +91,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onInstanceUpdated({ instance } = {}) {
     if (!instance?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_INSTANCE,
       payload: { instance },
     });
@@ -96,7 +101,7 @@ export function bindSocketToStore(socket, dispatch) {
     const instanceId = payload.instanceId || payload.id;
     if (!instanceId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_INSTANCE,
       payload: { instanceId },
     });
@@ -112,7 +117,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onOccurrenceCreated({ occurrence } = {}) {
     if (!occurrence?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.CREATE_OCCURRENCE,
       payload: { occurrence },
     });
@@ -121,7 +126,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onOccurrenceUpdated({ occurrence } = {}) {
     if (!occurrence?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_OCCURRENCE,
       payload: { occurrence },
     });
@@ -131,7 +136,7 @@ export function bindSocketToStore(socket, dispatch) {
     const occurrenceId = payload.occurrenceId || payload.id;
     if (!occurrenceId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_OCCURRENCE,
       payload: { occurrenceId },
     });
@@ -147,7 +152,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onFieldCreated({ field } = {}) {
     if (!field?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.CREATE_FIELD,
       payload: { field },
     });
@@ -156,7 +161,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onFieldUpdated({ field } = {}) {
     if (!field?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_FIELD,
       payload: { field },
     });
@@ -166,7 +171,7 @@ export function bindSocketToStore(socket, dispatch) {
     const fieldId = payload.fieldId || payload.id;
     if (!fieldId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_FIELD,
       payload: { fieldId },
     });
@@ -182,7 +187,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onPanelUpdated(panel) {
     if (!panel?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_PANEL,
       payload: { panel },
     });
@@ -192,7 +197,7 @@ export function bindSocketToStore(socket, dispatch) {
     const panelId = payload.panelId || payload.id;
     if (!panelId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_PANEL,
       payload: { panelId },
     });
@@ -201,7 +206,7 @@ export function bindSocketToStore(socket, dispatch) {
   function onPanelCreated(panel) {
     if (!panel?.id) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_PANEL,
       payload: { panel },
     });
@@ -220,7 +225,7 @@ export function bindSocketToStore(socket, dispatch) {
 
     if (!gridId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.UPDATE_GRID,
       payload: { gridId, grid: patch },
     });
@@ -231,7 +236,7 @@ export function bindSocketToStore(socket, dispatch) {
     const gridId = payload.gridId || payload.id;
     if (!gridId) return;
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.DELETE_GRID,
       payload: { gridId },
     });
@@ -246,7 +251,7 @@ export function bindSocketToStore(socket, dispatch) {
 
   function onGridCreated(payload = {}) {
     const grid = payload.grid || payload;
-    dispatch({
+    socketDispatch({
       type: ActionTypes.CREATE_GRID,
       payload: { grid },
     });
@@ -265,7 +270,7 @@ export function bindSocketToStore(socket, dispatch) {
     if (token) localStorage.setItem("moduli-token", token);
     if (userId) localStorage.setItem("moduli-userId", userId);
 
-    dispatch({
+    socketDispatch({
       type: ActionTypes.SET_USER_ID,
       payload: { userId },
     });
@@ -291,7 +296,7 @@ export function bindSocketToStore(socket, dispatch) {
     localStorage.removeItem("moduli-token");
     localStorage.removeItem("moduli-userId");
     localStorage.removeItem("moduli-gridId");
-    dispatch({ type: ActionTypes.LOGOUT });
+    socketDispatch({ type: ActionTypes.LOGOUT });
   }
 
   function onConnectError(err) {
@@ -303,7 +308,7 @@ export function bindSocketToStore(socket, dispatch) {
       localStorage.removeItem("moduli-userId");
       localStorage.removeItem("moduli-gridId");
 
-      dispatch({ type: ActionTypes.LOGOUT });
+      socketDispatch({ type: ActionTypes.LOGOUT });
 
       try {
         socket.disconnect();
@@ -317,6 +322,43 @@ export function bindSocketToStore(socket, dispatch) {
   socket.on("auth_success", onAuthSuccess);
   socket.on("auth_error", onAuthError);
   socket.on("connect_error", onConnectError);
+
+  // ======================================================
+  // GENERIC CRUD — Manifests, Views, Docs, Folders, Artifacts
+  // ======================================================
+  const genericModels = [
+    { name: "manifest", createType: ActionTypes.CREATE_MANIFEST, updateType: ActionTypes.UPDATE_MANIFEST, deleteType: ActionTypes.DELETE_MANIFEST },
+    { name: "view", createType: ActionTypes.CREATE_VIEW, updateType: ActionTypes.UPDATE_VIEW, deleteType: ActionTypes.DELETE_VIEW },
+    { name: "doc", createType: ActionTypes.CREATE_DOC, updateType: ActionTypes.UPDATE_DOC, deleteType: ActionTypes.DELETE_DOC },
+    { name: "folder", createType: ActionTypes.CREATE_FOLDER, updateType: ActionTypes.UPDATE_FOLDER, deleteType: ActionTypes.DELETE_FOLDER },
+    { name: "artifact", createType: ActionTypes.CREATE_ARTIFACT, updateType: ActionTypes.UPDATE_ARTIFACT, deleteType: ActionTypes.DELETE_ARTIFACT },
+  ];
+
+  const genericHandlers = [];
+
+  for (const { name, createType, updateType, deleteType } of genericModels) {
+    const onCreated = (payload = {}) => {
+      const entity = payload[name];
+      if (!entity?.id) return;
+      socketDispatch({ type: createType, payload: { [name]: entity } });
+    };
+    const onUpdated = (payload = {}) => {
+      const entity = payload[name];
+      if (!entity?.id) return;
+      socketDispatch({ type: updateType, payload: { [name]: entity } });
+    };
+    const onDeleted = (payload = {}) => {
+      const entityId = payload[`${name}Id`] || payload.id;
+      if (!entityId) return;
+      socketDispatch({ type: deleteType, payload: { [`${name}Id`]: entityId } });
+    };
+
+    socket.on(`${name}_created`, onCreated);
+    socket.on(`${name}_updated`, onUpdated);
+    socket.on(`${name}_deleted`, onDeleted);
+
+    genericHandlers.push({ name, onCreated, onUpdated, onDeleted });
+  }
 
   // ======================================================
   // SERVER ERRORS / MISC
@@ -367,5 +409,11 @@ export function bindSocketToStore(socket, dispatch) {
     socket.off("connect_error", onConnectError);
 
     socket.off("server_error", onServerError);
+
+    for (const { name, onCreated, onUpdated, onDeleted } of genericHandlers) {
+      socket.off(`${name}_created`, onCreated);
+      socket.off(`${name}_updated`, onUpdated);
+      socket.off(`${name}_deleted`, onDeleted);
+    }
   };
 }

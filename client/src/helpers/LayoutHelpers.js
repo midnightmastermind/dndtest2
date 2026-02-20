@@ -40,18 +40,58 @@ export function getItemsByIds(ids, lookup) {
 }
 
 /**
+ * Checks whether an occurrence should be visible given the current iteration date.
+ * - "persistent" → always visible
+ * - "specific"   → visible only when iteration date matches occurrence date (same day)
+ * - "untilDone"  → visible until completedOn is set, then only on that date
+ */
+function occurrenceMatchesIteration(occ, currentIterationValue) {
+  if (!occ?.iteration) return true; // no iteration info = always show
+  const mode = occ.iteration.mode;
+  if (mode === "persistent") return true;
+
+  if (!currentIterationValue) return true; // can't filter without a target date
+
+  const occDate = (occ.iteration.timeValue || occ.iteration.value) ? new Date(occ.iteration.timeValue || occ.iteration.value) : null;
+  const curDate = new Date(currentIterationValue);
+
+  if (!occDate) return true;
+
+  // Normalize to date-only comparison
+  const sameDay = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (mode === "specific") {
+    return sameDay(occDate, curDate);
+  }
+
+  if (mode === "untilDone") {
+    const completedOn = occ.iteration.completedOn ? new Date(occ.iteration.completedOn) : null;
+    if (!completedOn) return true; // not done yet → always visible
+    return sameDay(completedOn, curDate);
+  }
+
+  return true;
+}
+
+/**
  * Gets the instances for a container by looking up its occurrences
  * @param {Object} container - Container with occurrences array (of IDs)
  * @param {Object} occurrencesLookup - Lookup map for occurrences
  * @param {Object} instancesLookup - Lookup map for instances
+ * @param {Date|string} currentIterationValue - Optional: filter by current iteration date
  * @returns {Array} Array of instance objects
  */
-export function getContainerItems(container, occurrencesLookup, instancesLookup) {
+export function getContainerItems(container, occurrencesLookup, instancesLookup, currentIterationValue) {
   if (!container?.occurrences) return [];
   return (container.occurrences || [])
     .map(occId => {
       const occ = getItemById(occId, occurrencesLookup);
       if (!occ) return null;
+      // Filter by iteration if a current date is provided
+      if (currentIterationValue && !occurrenceMatchesIteration(occ, currentIterationValue)) return null;
       // Occurrence has targetType and targetId - lookup the actual item
       return getItemById(occ.targetId, instancesLookup);
     })
@@ -66,18 +106,22 @@ export function getContainerItems(container, occurrencesLookup, instancesLookup)
  * @param {Object} instancesLookup - Lookup map for instances
  * @returns {Array} Array of { instance, occurrence } objects
  */
-export function getContainerItemsWithOccurrences(container, occurrencesLookup, instancesLookup) {
+export function getContainerItemsWithOccurrences(container, occurrencesLookup, instancesLookup, currentIterationValue) {
   if (!container?.occurrences) return [];
   return (container.occurrences || [])
     .map(occId => {
       const occ = getItemById(occId, occurrencesLookup);
       if (!occ) return null;
+      if (currentIterationValue && !occurrenceMatchesIteration(occ, currentIterationValue)) return null;
       const instance = getItemById(occ.targetId, instancesLookup);
       if (!instance) return null;
       return { instance, occurrence: occ };
     })
     .filter(Boolean);
 }
+
+// Re-export for external use
+export { occurrenceMatchesIteration };
 
 /**
  * Gets the containers for a panel by looking up its occurrences
@@ -181,6 +225,7 @@ export function arrayMove(list = [], from, to) {
 
 /**
  * Creates a panel with its occurrence in the grid
+ * @param {string} userId - Required user ID for the occurrence
  */
 export function createPanelInGrid({
   dispatch,
@@ -188,9 +233,10 @@ export function createPanelInGrid({
   grid,
   panel,
   placement,
+  userId,
   emit = true,
 }) {
-  if (!grid || !panel?.id) return;
+  if (!grid || !panel?.id || !userId) return;
 
   const gridId = grid._id?.toString() || grid.id;
   const occurrenceId = uid();
@@ -198,13 +244,14 @@ export function createPanelInGrid({
   // 1. Create the panel entity
   CommitHelpers.createPanel({ dispatch, socket, panel, emit });
 
-  // 2. Create the occurrence
+  // 2. Create the occurrence (panels are persistent by default)
   const occurrence = {
     id: occurrenceId,
+    userId,
     targetType: "panel",
     targetId: panel.id,
     gridId,
-    iteration: { key: "time", value: new Date() },
+    iteration: { key: "time", value: new Date(), timeValue: new Date(), timeFilter: "daily", mode: "persistent" },
     timestamp: new Date(),
     placement: placement || { row: 0, col: 0, width: 1, height: 1 },
     fields: {},
@@ -229,6 +276,7 @@ export function createPanelInGrid({
 
 /**
  * Creates a container with its occurrence in a panel
+ * @param {string} userId - Required user ID for the occurrence
  */
 export function createContainerInPanel({
   dispatch,
@@ -236,10 +284,11 @@ export function createContainerInPanel({
   gridId,
   panel,
   container,
+  userId,
   index = null,
   emit = true,
 }) {
-  if (!gridId || !panel || !container?.id) return;
+  if (!gridId || !panel || !container?.id || !userId) return;
 
   const panelId = panel.id || panel._id?.toString();
   const occurrenceId = uid();
@@ -247,13 +296,14 @@ export function createContainerInPanel({
   // 1. Create the container entity
   CommitHelpers.createContainer({ dispatch, socket, container, emit });
 
-  // 2. Create the occurrence
+  // 2. Create the occurrence (containers are persistent by default)
   const occurrence = {
     id: occurrenceId,
+    userId,
     targetType: "container",
     targetId: container.id,
     gridId,
-    iteration: { key: "time", value: new Date() },
+    iteration: { key: "time", value: new Date(), timeValue: new Date(), timeFilter: "daily", mode: "persistent" },
     timestamp: new Date(),
     fields: {},
     meta: { panelId },
@@ -277,6 +327,8 @@ export function createContainerInPanel({
 
 /**
  * Creates an instance with its occurrence in a container
+ * @param {string} userId - Required user ID for the occurrence
+ * @param {string} iterationMode - Persistence mode: 'persistent', 'specific', or 'untilDone'
  */
 export function createInstanceInContainer({
   dispatch,
@@ -284,10 +336,12 @@ export function createInstanceInContainer({
   gridId,
   container,
   instance,
+  userId,
   index = null,
+  iterationMode = "specific",
   emit = true,
 }) {
-  if (!gridId || !container || !instance?.id) return;
+  if (!gridId || !container || !instance?.id || !userId) return;
 
   const containerId = container.id || container._id?.toString();
   const occurrenceId = uid();
@@ -304,10 +358,11 @@ export function createInstanceInContainer({
   // 2. Create the occurrence
   const occurrence = {
     id: occurrenceId,
+    userId,
     targetType: "instance",
     targetId: instance.id,
     gridId,
-    iteration: { key: "time", value: new Date() },
+    iteration: { key: "time", value: new Date(), timeValue: new Date(), timeFilter: "daily", mode: iterationMode },
     timestamp: new Date(),
     fields: {},
     meta: { containerId },
@@ -397,6 +452,11 @@ export function copyInstance({
  * Creates a new occurrence for an existing instance in a container
  * Used for "copy-drag" mode where the same instance appears in multiple places
  * This does NOT duplicate the instance - just creates a new occurrence reference
+ *
+ * @param {Object} params
+ * @param {string} params.userId - Required user ID for the occurrence
+ * @param {string} params.iterationMode - Persistence mode: 'persistent', 'specific', or 'untilDone'
+ * @param {Date|string} params.iterationValue - The date for this occurrence (for 'specific' mode)
  */
 export function copyInstanceToContainer({
   dispatch,
@@ -404,23 +464,45 @@ export function copyInstanceToContainer({
   gridId,
   sourceInstanceId,
   toContainer,
+  userId,
   toIndex = null,
   emit = true,
+  iterationMode = "specific",  // Default: specific to this iteration
+  iterationValue = null,       // The date for this occurrence
+  sourceOccurrence = null,     // Source occurrence to copy field values from
 }) {
-  if (!gridId || !sourceInstanceId || !toContainer) return null;
+  if (!gridId || !sourceInstanceId || !toContainer || !userId) return null;
 
   const containerId = toContainer.id || toContainer._id?.toString();
   const occurrenceId = uid();
 
-  // Create the occurrence (no instance creation - we're referencing an existing instance)
+  // Determine the iteration value - use provided date or current date
+  const dateValue = iterationValue || new Date();
+
+  // Deep-clone field values from source occurrence if available (D2 bug fix)
+  let copiedFields = {};
+  if (sourceOccurrence?.fields && typeof sourceOccurrence.fields === "object") {
+    try {
+      copiedFields = JSON.parse(JSON.stringify(sourceOccurrence.fields));
+    } catch {
+      copiedFields = { ...sourceOccurrence.fields };
+    }
+  }
+
+  // Create the occurrence with persistence mode
   const occurrence = {
     id: occurrenceId,
+    userId,
     targetType: "instance",
     targetId: sourceInstanceId,
     gridId,
-    iteration: { key: "time", value: new Date() },
+    iteration: {
+      key: "time",
+      value: dateValue,
+      mode: iterationMode,  // 'persistent', 'specific', or 'untilDone'
+    },
     timestamp: new Date(),
-    fields: {},
+    fields: copiedFields,
     meta: { containerId },
   };
 
@@ -441,14 +523,89 @@ export function copyInstanceToContainer({
 }
 
 /**
+ * Creates a linked (copylink) occurrence for an instance in a container.
+ * Linked occurrences share field values — editing one propagates to all
+ * occurrences in the same linkedGroupId.
+ */
+export function copylinkInstanceToContainer({
+  dispatch,
+  socket,
+  gridId,
+  sourceInstanceId,
+  sourceOccurrenceId,
+  toContainer,
+  userId,
+  toIndex = null,
+  emit = true,
+  iterationMode = "specific",
+  iterationValue = null,
+  sourceOccurrence = null,
+}) {
+  if (!gridId || !sourceInstanceId || !toContainer || !userId) return null;
+
+  const containerId = toContainer.id || toContainer._id?.toString();
+  const occurrenceId = uid();
+  const dateValue = iterationValue || new Date();
+
+  // Determine linkedGroupId: use source's group, or the source occurrence ID itself
+  const linkedGroupId = sourceOccurrence?.linkedGroupId || sourceOccurrenceId || uid();
+
+  // Copy field values from source occurrence
+  let copiedFields = {};
+  if (sourceOccurrence?.fields && typeof sourceOccurrence.fields === "object") {
+    try {
+      copiedFields = JSON.parse(JSON.stringify(sourceOccurrence.fields));
+    } catch {
+      copiedFields = { ...sourceOccurrence.fields };
+    }
+  }
+
+  const occurrence = {
+    id: occurrenceId,
+    userId,
+    targetType: "instance",
+    targetId: sourceInstanceId,
+    gridId,
+    iteration: {
+      key: "time",
+      value: dateValue,
+      mode: iterationMode,
+    },
+    timestamp: new Date(),
+    fields: copiedFields,
+    linkedGroupId,
+    meta: { containerId },
+  };
+
+  // Also tag the source occurrence with the same linkedGroupId if it doesn't have one
+  if (sourceOccurrenceId && !sourceOccurrence?.linkedGroupId) {
+    CommitHelpers.updateOccurrence({
+      dispatch,
+      socket,
+      occurrence: { id: sourceOccurrenceId, linkedGroupId },
+      emit,
+    });
+  }
+
+  dispatch({ type: "CREATE_OCCURRENCE", payload: { occurrence } });
+  if (emit) socket.emit("create_occurrence", { occurrence });
+
+  addInstanceToContainer({ dispatch, socket, container: toContainer, occurrenceId, index: toIndex, emit });
+  return { occurrence, linkedGroupId };
+}
+
+/**
  * Creates a new occurrence for an existing container in a panel
  * Used for "copy-drag" mode where the same container appears in multiple panels
  * This does NOT duplicate the container entity - just creates a new occurrence reference
  *
  * @param {Object} params
+ * @param {string} params.userId - Required user ID for the occurrence
  * @param {string} params.sourceContainerId - The container entity ID to reference
  * @param {Object} params.toPanel - The target panel to add the occurrence to
  * @param {number} params.toIndex - Optional insertion index
+ * @param {string} params.iterationMode - Persistence mode: 'persistent', 'specific', or 'untilDone'
+ * @param {Date|string} params.iterationValue - The date for this occurrence
  */
 export function copyContainerToPanel({
   dispatch,
@@ -456,21 +613,30 @@ export function copyContainerToPanel({
   gridId,
   sourceContainerId,
   toPanel,
+  userId,
   toIndex = null,
   emit = true,
+  iterationMode = "specific",
+  iterationValue = null,
 }) {
-  if (!gridId || !sourceContainerId || !toPanel) return null;
+  if (!gridId || !sourceContainerId || !toPanel || !userId) return null;
 
   const panelId = toPanel.id || toPanel._id?.toString();
   const occurrenceId = uid();
+  const dateValue = iterationValue || new Date();
 
   // Create the occurrence (referencing the existing container entity)
   const occurrence = {
     id: occurrenceId,
+    userId,
     targetType: "container",
     targetId: sourceContainerId, // Same container, new occurrence
     gridId,
-    iteration: { key: "time", value: new Date() },
+    iteration: {
+      key: "time",
+      value: dateValue,
+      mode: iterationMode,
+    },
     timestamp: new Date(),
     fields: {},
     meta: { panelId },

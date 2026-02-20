@@ -133,6 +133,7 @@ export function createOccurrenceData(params) {
     placement,
     fields = {},
     meta = {},
+    linkedGroupId = null,
   } = params;
 
   return {
@@ -146,5 +147,6 @@ export function createOccurrenceData(params) {
     ...(placement && { placement }),
     fields,
     meta,
+    ...(linkedGroupId && { linkedGroupId }),
   };
 }

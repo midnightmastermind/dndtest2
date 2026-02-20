@@ -40,6 +40,7 @@ export const DragType = {
   PANEL: "panel",
   CONTAINER: "container",
   INSTANCE: "instance",
+  ARTIFACT: "artifact",
   EXTERNAL: "external",
   FILE: "file",
   TEXT: "text",
@@ -49,9 +50,9 @@ export const DragType = {
 // What each drop zone accepts
 export const DropAccepts = {
   GRID_CELL: [DragType.PANEL],
-  PANEL_CONTENT: [DragType.CONTAINER, DragType.INSTANCE, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
-  CONTAINER_LIST: [DragType.INSTANCE, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
-  INSTANCE: [DragType.INSTANCE, DragType.FILE, DragType.TEXT, DragType.URL], // Accept files/text/URLs for positional insertion
+  PANEL_CONTENT: [DragType.CONTAINER, DragType.INSTANCE, DragType.ARTIFACT, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
+  CONTAINER_LIST: [DragType.INSTANCE, DragType.ARTIFACT, DragType.EXTERNAL, DragType.FILE, DragType.TEXT, DragType.URL],
+  INSTANCE: [DragType.INSTANCE, DragType.ARTIFACT, DragType.FILE, DragType.TEXT, DragType.URL], // Accept files/text/URLs/artifacts for positional insertion
 };
 
 // ============================================================
